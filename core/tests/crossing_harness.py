@@ -30,7 +30,7 @@ try:
 except ImportError:  # pragma: no cover - mac_app/crossing.py is pure and ships in the tree
     mac_crossing = None
 
-CAPS = ["clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync",
+CAPS = ["clipboard", "clipboard_image", "clipboard_files", "gestures", "media_keys", "text", "settings", "design_sync",
         "layout", "displays", "ping_rtt"]
 # The way a push goes through each side, and how hard: well past the 120 px resistance.
 PUSH = {"left": (-40, 0), "right": (40, 0), "top": (0, -40), "bottom": (0, 40)}

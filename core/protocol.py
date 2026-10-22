@@ -38,6 +38,8 @@ from nacl.bindings import (
 )
 from nacl.exceptions import CryptoError
 
+from core import clipboard_files
+
 HEADER_SIZE = 4
 COUNTER_SIZE = 4
 NONCE_PREFIX_SIZE = 8
@@ -68,6 +70,13 @@ CLIPBOARD_MAX_BYTES = 256 * 1024
 # 0.1s on wired gigabit and half a second on decent Wi-Fi. Beyond it the text still goes.
 CLIPBOARD_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 CLIPBOARD_IMAGE_PNG = "png"
+# Copied files and folders ride beside the text as `files` (core/clipboard_files.py): at most 8 MiB of
+# file in all, 1024 entries, 1024 bytes and 32 components to a path. Past any of them only `files` is
+# dropped. A sender that sends files leaves the image out, so the frame stays under MAX_FRAME_BYTES.
+CLIPBOARD_FILES_MAX_BYTES = clipboard_files.MAX_BYTES
+CLIPBOARD_FILES_MAX_ENTRIES = clipboard_files.MAX_ENTRIES
+CLIPBOARD_FILES_MAX_PATH_BYTES = clipboard_files.MAX_PATH_BYTES
+CLIPBOARD_FILES_MAX_DEPTH = clipboard_files.MAX_DEPTH
 # What a PNG may decode to, checked from its bytes first (png_fits): 2^25 pixels holds an 8K screen
 # (7680x4320 is 33,177,600) and is 128 MiB as 8-bit RGBA, 256 MiB at 16 bits a channel, where a
 # few compressed megabytes could otherwise claim gigabytes. Metadata a decoder inflates (colour profiles, compressed text) is held
@@ -271,15 +280,18 @@ def scroll_msg(dy, dx=0.0, mode: str = "line") -> dict:
     return {"type": MSG_SCROLL, "data": {"dy": dy, "dx": dx, "mode": mode}}
 
 
-def clipboard_msg(text: str = None, image: bytes = None) -> dict:
-    """Whatever was on the clipboard at the switch: `text`, and an optional PNG under `image`
-    (base64) with `image_format` naming it. Each key is omitted when absent (WIRE.md section 3)."""
+def clipboard_msg(text: str = None, image: bytes = None, files: list = None) -> dict:
+    """Whatever was on the clipboard at the switch: `text`, an optional PNG under `image`
+    (base64) with `image_format` naming it, and optional copied `files` (the entries
+    clipboard_files.encode_paths builds). Each key is omitted when absent (WIRE.md section 3)."""
     data = {}
     if text is not None:
         data["text"] = text
     if image is not None:
         data["image"] = base64.b64encode(image).decode("ascii")
         data["image_format"] = CLIPBOARD_IMAGE_PNG
+    if files:
+        data["files"] = files
     return {"type": MSG_CLIPBOARD, "data": data}
 
 
@@ -1268,7 +1280,9 @@ def read_input(message):
 
 def read_clipboard(message):
     """{text, image} from a `clipboard`, each None when absent or over its limit (that part is
-    dropped and the rest stands), or None when the message is malformed."""
+    dropped and the rest stands), or None when the message is malformed. When valid `files` came
+    too, `files` is their decoded [(path, bytes or None for a folder)]; invalid `files`, in whole,
+    are dropped like an oversized image, and the key is otherwise absent."""
     parsed = read_message(message)
     if parsed is None or parsed[0] != MSG_CLIPBOARD:
         return None
@@ -1278,7 +1292,12 @@ def read_clipboard(message):
         return None
     if text is not None and _utf8_size(text) > CLIPBOARD_MAX_BYTES:
         text = None
-    return {"text": text, "image": clipboard_image(data)}
+    read = {"text": text, "image": clipboard_image(data)}
+    if "files" in data:
+        files = clipboard_files.parse_entries(data["files"])
+        if files is not None:
+            read["files"] = files
+    return read
 
 
 def arrangement_v6(edge: str, set_at: int, by: bytes, way_back=None, way_back_by=None) -> dict:

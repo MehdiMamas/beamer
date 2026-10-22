@@ -17,6 +17,7 @@ from typing import Callable, Optional, Tuple
 
 from . import return_edge as crossing
 from . import peerlist
+from . import clipboard_files
 from . import protocol
 from .i18n import tr, trc
 from .response_time import ResponseTime
@@ -1746,13 +1747,14 @@ class LinkResponder:
             return
         text = read["text"] if read["text"] and "clipboard" in link.own_caps else None
         image = read["image"] if "clipboard_image" in link.own_caps else None
-        if text is None and image is None:
+        files = read.get("files") if "clipboard_files" in link.own_caps else None
+        if text is None and image is None and files is None:
             return
         with self._lock:
             if self._owner is not link:
                 return
             visit = self._visit
-        self._clipboard_later(lambda: self._set_clipboard(link, visit, text, image), (id(link), visit))
+        self._clipboard_later(lambda: self._set_clipboard(link, visit, text, image, files), (id(link), visit))
 
     def _clipboard_later(self, job, write=None) -> None:
         with self._clipboard_jobs_lock:
@@ -1781,11 +1783,21 @@ class LinkResponder:
             except Exception:
                 LOGGER.exception("A clipboard job failed")
 
-    def _set_clipboard(self, link: _Link, visit: int, text, image) -> None:
+    def _set_clipboard(self, link: _Link, visit: int, text, image, files=None) -> None:
         """A write begins only while its sender still owns this machine in the visit it was sent in;
-        one already in flight when the ownership ends is not taken back, as it cannot be."""
+        one already in flight when the ownership ends is not taken back, as it cannot be. Files are
+        written to a fresh folder in Beamer's cache once, then offered as files; where the platform
+        cannot, or the write fails, the text and image still go."""
         initial_stamp = self._clipboard_stamp()
         clipboard = self._clipboard_module()
+        paths, set_files = None, getattr(clipboard, "set_files", None)
+        if files and set_files is not None:
+            try:
+                paths = clipboard_files.write_transfer(files)
+            except OSError:
+                LOGGER.exception("Could not store the files %s sent", link.name)
+        if paths is None and text is None and image is None:
+            return
         deadline = time.monotonic() + CLIPBOARD_RETRY_WINDOW_SECONDS
         for attempt in range(CLIPBOARD_RETRY_ATTEMPTS):
             if attempt and time.monotonic() >= deadline:
@@ -1796,7 +1808,9 @@ class LinkResponder:
             if attempt and (initial_stamp is None or self._clipboard_stamp() != initial_stamp):
                 return
             try:
-                written = clipboard.set_contents(text, image)
+                written = bool(paths) and bool(set_files(paths))
+                if not written and (text is not None or image is not None):
+                    written = clipboard.set_contents(text, image)
             except Exception:
                 written = False
                 if attempt == CLIPBOARD_RETRY_ATTEMPTS - 1:
@@ -1851,6 +1865,8 @@ class LinkResponder:
             try:
                 clipboard = self._clipboard_module()
                 text, image = getattr(clipboard, "read_contents", clipboard.get_contents)()
+                read_files = getattr(clipboard, "read_files", None)
+                local_files = read_files() if read_files is not None and "clipboard_files" in link.caps else None
             except Exception:
                 if attempt == CLIPBOARD_RETRY_ATTEMPTS - 1:
                     LOGGER.exception("Could not read the clipboard for %s", link.name)
@@ -1865,11 +1881,15 @@ class LinkResponder:
             text = None
         if "clipboard_image" not in link.caps or image is None or not protocol.png_fits(image):
             image = None
-        if text is None and image is None:
+        # Files go without the image, so the frame stays under MAX_FRAME_BYTES.
+        files = clipboard_files.encode_paths(local_files) if local_files and "clipboard_files" in link.caps else None
+        if files is not None:
+            image = None
+        if text is None and image is None and files is None:
             return
         with self._lock:
             if self._visit == visit and self._owner is None and self._clipboard_stamp() == stamp:
-                link.post(protocol.clipboard_msg(text, image))
+                link.post(protocol.clipboard_msg(text, image, files))
 
     # Landing and the lock screen
 

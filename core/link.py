@@ -781,7 +781,9 @@ class OutboundLink:
             if "clipboard_image" not in self._caps:
                 data.pop("image", None)
                 data.pop("image_format", None)
-            if not data.get("text") and "image" not in data:
+            if "clipboard_files" not in self._caps:
+                data.pop("files", None)
+            if not data.get("text") and "image" not in data and "files" not in data:
                 return True
             message = {"type": kind, "data": data}
         elif _CAP_FOR.get(kind) is not None and _CAP_FOR[kind] not in self._caps:
@@ -1017,7 +1019,8 @@ def _weight(message):
     if message.get("type") != protocol.MSG_CLIPBOARD:
         return 0
     data = message.get("data") or {}
-    return len(data.get("text") or "") * 4 + len(data.get("image") or "")
+    files = data.get("files")
+    return len(data.get("text") or "") * 4 + len(data.get("image") or "") + (sum(len(entry.get("data") or "") + len(entry.get("path") or "") for entry in files if isinstance(entry, dict)) if isinstance(files, list) else 0)
 
 
 def _close_socket(sock):

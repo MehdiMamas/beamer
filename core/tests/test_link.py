@@ -577,6 +577,19 @@ class LinkLiveTests(unittest.TestCase):
         time.sleep(0.2)
         self.assertEqual(self.machine.clipboard.set_calls, [])
 
+    def test_files_are_stripped_for_a_peer_without_the_capability(self):
+        queued = []
+        self.link._enqueue = lambda message, seq: queued.append(message) or True
+        files = [{"path": "a.txt", "data": "eA=="}]
+        self.link._caps = frozenset({"clipboard"})
+        self.assertTrue(self.link.post(protocol.clipboard_msg("hello", None, files)))
+        self.assertEqual(queued[0]["data"], {"text": "hello"})
+        self.assertTrue(self.link.post(protocol.clipboard_msg(None, None, files)))
+        self.assertEqual(len(queued), 1)
+        self.link._caps = frozenset({"clipboard", "clipboard_files"})
+        self.assertTrue(self.link.post(protocol.clipboard_msg(None, None, files)))
+        self.assertEqual(queued[1]["data"]["files"], files)
+
     def test_settings_are_not_sent_to_a_peer_without_the_capability(self):
         self.link._caps = frozenset()
         self.assertTrue(self.link.post(protocol.settings_msg({"a": 1})))

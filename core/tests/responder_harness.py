@@ -163,7 +163,7 @@ class FakeClipboard:
         return True
 
 
-CAPS = ["clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings"]
+CAPS = ["clipboard", "clipboard_image", "clipboard_files", "gestures", "media_keys", "text", "settings"]
 
 
 def free_port():
