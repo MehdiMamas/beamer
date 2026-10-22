@@ -8,6 +8,34 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "X-Beamer-Status: draft, awaiting check\n"
 
+#: core/audio.py
+msgid "microphone sharing stopped: %s"
+msgstr "la condivisione del microfono si è fermata: %s"
+
+#: core/audio.py
+msgid "cannot send this computer's sound: %s"
+msgstr "impossibile inviare l'audio di questo computer: %s"
+
+#: core/audio.py
+msgid "sending this computer's sound stopped: %s"
+msgstr "l'invio dell'audio di questo computer si è fermato: %s"
+
+#: core/audio.py
+msgid "cannot play the other computer's microphone: %s"
+msgstr "impossibile riprodurre il microfono dell'altro computer: %s"
+
+#: core/audio.py
+msgid "microphone sharing is off: %s"
+msgstr "la condivisione del microfono è disattivata: %s"
+
+#: core/audio.py
+msgid "the other computer's sound is off: %s"
+msgstr "l'audio dell'altro computer è disattivato: %s"
+
+#: core/audio.py
+msgid "capture failed: %s"
+msgstr "acquisizione non riuscita: %s"
+
 #: core/effects.py mac_app/pages.py win_app/pages_win.py
 msgid "Light"
 msgstr "Luce"

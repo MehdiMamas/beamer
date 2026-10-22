@@ -487,6 +487,7 @@ Capabilities say what a machine does with a message it receives:
 | `layout` | with `settings`, it sends and receives the shared tile picture (`settings.data.layout`) |
 | `displays` | with `layout`, it sends and receives each machine's logical display rectangles and display-targeted edges |
 | `ping_rtt` | it sends and answers response-time probes on `ping` in both directions |
+| `audio` | it takes the `audio_*` messages ("Audio", section 5) |
 
 A sender does not send a message its peer's capabilities do not cover. A receiver that gets one
 anyway drops it, and still acknowledges it when it carries a `seq`.
@@ -906,6 +907,41 @@ names a machine sends input there, from home or straight from the machine it is 
   in a chain; version 6 does not.
 - Version 5 sent the clipboard before `focus`. Version 6 sends it after, because a responder takes
   a clipboard only from its owner; the input that follows it on the same link is still behind it.
+
+### Audio
+
+Optional and off until a user turns it on. Five messages, all gated by the `audio` capability, so a
+peer without it is never sent one. Each carries `dir`: `out` is the system sound of the guest
+(the machine that is not the audio host), played on the host; `mic` is the host's microphone,
+played on the guest into a virtual input device.
+
+| Message | Fields | From |
+|---|---|---|
+| `audio_config` | `mode` (`follow` or `fixed`), `host` (a 16-byte id as text, only with `fixed`) | both, when a link comes up and when the setting changes, before any other audio message |
+| `audio_want` | `dir`, `rate`, `channels`, `format`, `frame_ms` | host: asks the guest to start sending `out` |
+| `audio_start` | the same fields | the sender of a stream, before its first `audio_data` |
+| `audio_data` | `dir`, `seq` (0 to 2^32-1, wrapping), `pcm` (base64) | the sender of a stream, one frame each |
+| `audio_stop` | `dir`, optional `reason` | either end |
+
+- Allow-lists: `rate` 48000; `channels` 1 or 2 (`out` 2, `mic` 1); `format` `s16le`; `frame_ms` 20.
+  Anything else is dropped. A new `format` is a new allow-list entry, not a new message.
+- `pcm` is whole samples (a multiple of 4 bytes), 1 to 64 KiB. Frames are not acknowledged and
+  are never resent; the receiver keeps a short jitter buffer (60 ms, at most 400 ms), plays them
+  in `seq` order, fills a gap with silence and drops a late or repeated one.
+- **Follow** (the default): the host is the machine the input is on. While input is on B, B is
+  the guest of A: its `out` is played on A and A's `mic` on B. When input returns to A, both
+  streams stop (`audio_stop`) and B's own output is as it was.
+- **Fixed host**: the host is the one named in `audio_config`, whatever machine owns the input.
+  Every other machine streams its `out` to the host and the host streams `mic` to each of them,
+  all the time; moving the input starts and stops nothing.
+- **Election** for a link, from the two `audio_config` messages: neither side fixed means follow.
+  If one side fixed a host, that wins and the side that was following logs it. If both fixed
+  different hosts, the one named by the machine with the lower id wins on both ends. A host that
+  is neither end of the link means no audio on that link.
+- A machine that cannot open a device answers with `audio_stop` and a `reason`; the link and
+  everything else carry on.
+- Not in this version: echo cancellation, Opus, per-app routing, volume sync, media keys, muting
+  the guest's own speakers.
 
 ### A phone
 

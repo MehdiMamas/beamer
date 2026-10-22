@@ -14,6 +14,7 @@ import threading
 from typing import Callable, Optional
 
 from . import audio_io, audio_stream, protocol
+from .i18n import tr
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class Streamer:
             if not self._stop.is_set():
                 LOGGER.exception("audio %s capture stopped", self.direction)
                 if self._on_fail is not None:
-                    self._on_fail("capture failed: %s" % error)
+                    self._on_fail(tr("capture failed: %s") % error)
 
     def stop(self) -> None:
         self._stop.set()
@@ -315,7 +316,7 @@ class AudioController:
             try:
                 source = self._devices().open_source("mic")
             except audio_io.AudioUnavailable as error:
-                self._say("microphone sharing is off: %s" % error)
+                self._say(tr("microphone sharing is off: %s") % error)
             else:
                 self._send(key, protocol.audio_start_msg("mic", audio_io.RATE, MIC_CHANNELS, "s16le", audio_io.FRAME_MS))
                 side.mic_send = Streamer(source, "mic", lambda message: self._send(key, message),
@@ -331,7 +332,7 @@ class AudioController:
             if side is not None and side.mic_send is not None:
                 side.mic_send = None
                 self._send(key, protocol.audio_stop_msg("mic", "failed"))
-        self._say("microphone sharing stopped: %s" % text)
+        self._say(tr("microphone sharing stopped: %s") % text)
 
     def _stop_sound_play(self, side: _HostSide) -> None:
         play, side.sound_play, side.sound_wanted = side.sound_play, None, False
@@ -364,7 +365,7 @@ class AudioController:
             try:
                 side.sound_play = self._playback("speaker", SOUND_CHANNELS, "audio-sound")
             except audio_io.AudioUnavailable as error:
-                self._say("the other computer's sound is off: %s" % error)
+                self._say(tr("the other computer's sound is off: %s") % error)
                 side.sound_wanted = False
                 self._send(key, protocol.audio_stop_msg("out", "unavailable"))
         elif kind == protocol.MSG_AUDIO_DATA and fields["dir"] == "out":
@@ -409,12 +410,12 @@ class AudioController:
         try:
             source = self._devices().open_source("loopback")
         except audio_io.AudioUnavailable as error:
-            self._say("cannot send this computer's sound: %s" % error)
+            self._say(tr("cannot send this computer's sound: %s") % error)
             self._send(key, protocol.audio_stop_msg("out", "unavailable"))
             return
         self._send(key, protocol.audio_start_msg("out", audio_io.RATE, SOUND_CHANNELS, "s16le", audio_io.FRAME_MS))
         side.sound_send = Streamer(source, "out", lambda message: self._send(key, message),
-                                   lambda text: self._say("sending this computer's sound stopped: %s" % text))
+                                   lambda text: self._say(tr("sending this computer's sound stopped: %s") % text))
         side.sound_send.start()
 
     def _start_mic(self, key: str, side: _GuestSide, fields: dict) -> None:
@@ -426,7 +427,7 @@ class AudioController:
         try:
             side.mic_play = self._playback("virtual_mic", MIC_CHANNELS, "audio-mic")
         except audio_io.AudioUnavailable as error:
-            self._say("cannot play the other computer's microphone: %s" % error)
+            self._say(tr("cannot play the other computer's microphone: %s") % error)
             self._send(key, protocol.audio_stop_msg("mic", "unavailable"))
 
     # -- messages -----------------------------------------------------------

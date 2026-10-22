@@ -152,6 +152,26 @@ In your own appearance: light if your GitHub is light, dark if it is dark.
   switch off on Overview. More in [SECURITY.md](SECURITY.md).
 - **Free and open source.** No account, no subscription, GPL-3.0.
 
+## Audio
+
+Optional. Turn it on in the app (Play the other computer's sound, Share my microphone) and pick
+the **Audio host**:
+
+- **Follow the input** (default): while the keyboard and mouse are on computer B, B's sound plays
+  on the computer you are at (the headset) and your microphone plays on B. When the input comes
+  back, it stops.
+- **Fixed host**: one computer (this one, or a named one) always plays every computer's sound and
+  always sends its microphone to all of them, wherever the input is. If two computers disagree,
+  the one with a fixed host wins.
+
+It needs the optional packages `soundcard` and `numpy` (`pip install soundcard numpy`); without
+them everything else works and audio stays off. To use the microphone in programs on the other
+computer you need a virtual cable: [VB-CABLE](https://vb-audio.com/Cable/) ("CABLE Input") on
+Windows, [BlackHole](https://existential.audio/blackhole/) on a Mac (which also lets a Mac share its
+own sound), and on Linux Beamer makes a PulseAudio/PipeWire null sink (`pactl`) itself. Not done
+yet: echo cancellation, compression, per-app routing, volume sync and muting the other
+computer's own speakers; wear the headset on the computer you sit at.
+
 ## Settings
 
 Each machine has its own settings window and makes its own choices about how input leaves it.

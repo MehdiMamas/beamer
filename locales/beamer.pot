@@ -6,6 +6,34 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language: en_GB\n"
 
+#: core/audio.py
+msgid "microphone sharing stopped: %s"
+msgstr ""
+
+#: core/audio.py
+msgid "cannot send this computer's sound: %s"
+msgstr ""
+
+#: core/audio.py
+msgid "sending this computer's sound stopped: %s"
+msgstr ""
+
+#: core/audio.py
+msgid "cannot play the other computer's microphone: %s"
+msgstr ""
+
+#: core/audio.py
+msgid "microphone sharing is off: %s"
+msgstr ""
+
+#: core/audio.py
+msgid "the other computer's sound is off: %s"
+msgstr ""
+
+#: core/audio.py
+msgid "capture failed: %s"
+msgstr ""
+
 #: core/effects.py mac_app/pages.py win_app/pages_win.py
 msgid "Light"
 msgstr ""
