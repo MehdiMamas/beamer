@@ -108,5 +108,58 @@ class ReadContentsTest(unittest.TestCase):
             self.assertEqual(clipboard_portal.read_contents(), (None, None))
 
 
+class FilesTest(unittest.TestCase):
+    def setUp(self):
+        clipboard_portal.forget_sync()
+        self.saved = inject_portal._remote
+
+    def tearDown(self):
+        inject_portal._remote = self.saved
+
+    def test_set_files_offers_a_uri_list_and_a_gnome_copy(self):
+        stub = StubRemote(ready=True)
+        inject_portal._remote = stub
+        with mock.patch.object(inject_portal, "remote", return_value=stub):
+            self.assertTrue(clipboard_portal.set_files(["/tmp/a b.txt", "/tmp/dir"]))
+        offer = stub.session.set_selection.call_args[0][0]
+        self.assertEqual(set(offer), {"text/uri-list", "x-special/gnome-copied-files"})
+        self.assertEqual(offer["text/uri-list"].split(b"\r\n")[0].split(b"a%20b.txt")[1:], [b""])
+        self.assertTrue(offer["text/uri-list"].startswith(b"file://"))
+        self.assertTrue(offer["x-special/gnome-copied-files"].startswith(b"copy\nfile://"))
+        self.assertEqual(clipboard_portal._synced, 5)
+
+    def test_set_files_without_a_session_or_paths_is_false_and_never_waits(self):
+        stub = StubRemote(ready=False)
+        inject_portal._remote = stub
+        with mock.patch.object(inject_portal, "remote", return_value=stub):
+            self.assertFalse(clipboard_portal.set_files(["/tmp/a"]))
+        self.assertEqual(stub.asked, 0)
+        ready = StubRemote(ready=True)
+        inject_portal._remote = ready
+        with mock.patch.object(inject_portal, "remote", return_value=ready):
+            self.assertFalse(clipboard_portal.set_files([]))
+        ready.session.set_selection.assert_not_called()
+
+    def test_read_files_keeps_existing_local_files_only(self):
+        # POSIX-style uris, so the test means the same on every OS that runs it
+        uris = (b"# comment" + b"\r\n" + b"file:///tmp/x%20y.txt" + b"\r\n" + b"file:///tmp/gone" + b"\r\n"
+                + b"https://example.com/a" + b"\r\n" + b"file://other/host/z")
+        with mock.patch.object(clipboard_portal, "_offered", return_value=(["text/uri-list"], False, 5)), \
+                mock.patch.object(clipboard_portal, "_read", return_value=uris), \
+                mock.patch.object(clipboard_portal.os.path, "exists", side_effect=lambda p: p == "/tmp/x y.txt"):
+            self.assertEqual(clipboard_portal.read_files(), ["/tmp/x y.txt"])
+
+    def test_read_files_is_empty_for_our_own_copy_text_and_failures(self):
+        with mock.patch.object(clipboard_portal, "_offered", return_value=(["text/uri-list"], True, 5)):
+            self.assertEqual(clipboard_portal.read_files(), [])
+        with mock.patch.object(clipboard_portal, "_offered", return_value=(["text/plain"], False, 5)):
+            self.assertEqual(clipboard_portal.read_files(), [])
+        with mock.patch.object(clipboard_portal, "_offered", return_value=None):
+            self.assertEqual(clipboard_portal.read_files(), [])
+        with mock.patch.object(clipboard_portal, "_offered", return_value=(["text/uri-list"], False, 5)), \
+                mock.patch.object(clipboard_portal, "_read", side_effect=OSError("no")):
+            self.assertEqual(clipboard_portal.read_files(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

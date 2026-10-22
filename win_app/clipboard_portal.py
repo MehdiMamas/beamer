@@ -16,6 +16,7 @@ import os
 import select
 import time
 from typing import Optional, Tuple
+from urllib.parse import quote, unquote, urlparse
 
 import inject_portal
 
@@ -23,6 +24,8 @@ LOGGER = logging.getLogger(__name__)
 
 TEXT_MIMES = ("text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT")
 PNG_MIME = "image/png"
+URI_LIST_MIME = "text/uri-list"
+GNOME_FILES_MIME = "x-special/gnome-copied-files"
 TIMEOUT_SECONDS = 2.0
 # Each wait in set_contents, which runs on the link's reader: two stay under the sender's 1.5 s
 # wait for an acknowledgement (core/link.py ACK_STALL_SECONDS).
@@ -131,6 +134,39 @@ def changed_contents() -> Tuple[Optional[str], Optional[bytes]]:
         return None, None
 
 
+def _uris_to_paths(data: bytes) -> list:
+    """The existing local paths a text/uri-list names; every other line (a comment, a web link, a
+    path that is gone) is dropped."""
+    paths = []
+    for line in data.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parsed = urlparse(line)
+        if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+            continue
+        path = unquote(parsed.path)
+        if path and os.path.exists(path) and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def read_files() -> list:
+    """Local paths of the files and folders another app copied, [] when there are none, the
+    clipboard is Beamer's own, or it cannot be reached. Never raises."""
+    try:
+        offered = _offered()
+        if offered is None:
+            return []
+        formats, ours, _changes = offered
+        if ours or URI_LIST_MIME not in formats:
+            return []
+        return _uris_to_paths(_read(URI_LIST_MIME) or b"")
+    except Exception:
+        LOGGER.exception("Could not read the copied files")
+        return []
+
+
 def change_stamp() -> Optional[int]:
     """A number that moves whenever the clipboard changes, Beamer's own writes included, or None
     while the session is not up. Read without waiting: the sender asks under its lock."""
@@ -171,4 +207,30 @@ def set_contents(text: Optional[str], png: Optional[bytes]) -> bool:
     if written:
         changes = inject_portal.remote().ask(lambda session: session.changes, default=None, timeout=SET_SECONDS)
         _synced = changes
+    return written
+
+
+def set_files(paths) -> bool:
+    """Offer a copy of the files at `paths` as this machine's clipboard: a text/uri-list and the
+    GNOME copy format, which file managers paste from. False when there is nothing to set or the
+    clipboard cannot be reached. Never raises, and never waits for the session to start."""
+    global _synced
+    session = inject_portal._remote
+    if session is None or not session.ready.is_set():
+        return False
+    uris = [("file://" + quote(os.path.abspath(path))) for path in paths or ()]
+    if not uris:
+        return False
+    offer = {
+        URI_LIST_MIME: ("\r\n".join(uris) + "\r\n").encode("ascii"),
+        GNOME_FILES_MIME: ("copy\n" + "\n".join(uris)).encode("ascii"),
+    }
+    try:
+        written = bool(inject_portal.remote().ask(lambda session: session.set_selection(offer), default=False,
+                                                     timeout=SET_SECONDS))
+    except Exception:
+        LOGGER.exception("Could not set the clipboard files")
+        return False
+    if written:
+        _synced = inject_portal.remote().ask(lambda session: session.changes, default=None, timeout=SET_SECONDS)
     return written
