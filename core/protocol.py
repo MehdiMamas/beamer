@@ -115,7 +115,10 @@ MSG_AUDIO_START = "audio_start"
 MSG_AUDIO_DATA = "audio_data"
 MSG_AUDIO_STOP = "audio_stop"
 MSG_AUDIO_CONFIG = "audio_config"
-AUDIO_MESSAGES = frozenset({MSG_AUDIO_WANT, MSG_AUDIO_START, MSG_AUDIO_DATA, MSG_AUDIO_STOP, MSG_AUDIO_CONFIG})
+MSG_AUDIO_ALERT = "audio_alert"
+MSG_AUDIO_VOLUME = "audio_volume"
+AUDIO_MESSAGES = frozenset({MSG_AUDIO_WANT, MSG_AUDIO_START, MSG_AUDIO_DATA, MSG_AUDIO_STOP, MSG_AUDIO_CONFIG,
+                            MSG_AUDIO_ALERT, MSG_AUDIO_VOLUME})
 
 # System trackpad gestures. The Mac classifies one at the end of the movement and sends a
 # single message; the name is the finger motion, not its meaning, so the receiver decides
@@ -1339,7 +1342,9 @@ def read_paired(message):
 AUDIO_DIRS = ("out", "mic")
 AUDIO_RATES = (48000,)
 AUDIO_CHANNELS = (1, 2)
-AUDIO_FORMATS = ("s16le",)
+AUDIO_FORMATS = ("s16le", "opus")
+AUDIO_ALERT_KINDS = ("default", "error", "notify")
+AUDIO_MAX_OPUS_BYTES = 4000
 AUDIO_MODES = ("follow", "fixed")
 AUDIO_FRAME_MS = (20,)
 AUDIO_MAX_FRAME_BYTES = 64 * 1024
@@ -1374,8 +1379,12 @@ def audio_start_msg(dir: str, rate: int = 48000, channels: int = 2, format: str 
                                                "format": format, "frame_ms": frame_ms}}
 
 
-def audio_data_msg(dir: str, seq: int, pcm: bytes) -> dict:
-    return {"type": MSG_AUDIO_DATA, "data": {"dir": dir, "seq": seq, "pcm": base64.b64encode(pcm).decode("ascii")}}
+def audio_data_msg(dir: str, seq: int, pcm: bytes, format: str = "s16le") -> dict:
+    """One frame. `format` is left out for s16le; an Opus packet names itself."""
+    data = {"dir": dir, "seq": seq, "pcm": base64.b64encode(pcm).decode("ascii")}
+    if format != "s16le":
+        data["format"] = format
+    return {"type": MSG_AUDIO_DATA, "data": data}
 
 
 def audio_stop_msg(dir: str, reason: str = None) -> dict:
@@ -1394,7 +1403,8 @@ def read_audio_format(message, kind):
 
 
 def read_audio_data(message):
-    """{dir, seq, pcm} of an `audio_data`, or None when malformed, oversized or not whole samples."""
+    """{dir, seq, pcm, format} of an `audio_data`, or None when malformed, oversized or not whole samples
+    (one Opus packet is 1..AUDIO_MAX_OPUS_BYTES bytes)."""
     parsed = read_message(message)
     if parsed is None or parsed[0] != MSG_AUDIO_DATA:
         return None
@@ -1408,9 +1418,15 @@ def read_audio_data(message):
         pcm = base64.b64decode(text.encode("ascii"), validate=True)
     except (binascii.Error, ValueError):
         return None
-    if not pcm or len(pcm) > AUDIO_MAX_FRAME_BYTES or len(pcm) % 4:
+    fmt = data.get("format", "s16le")
+    if not _one_of(fmt, AUDIO_FORMATS):
         return None
-    return {"dir": data["dir"], "seq": data["seq"], "pcm": pcm}
+    if fmt == "opus":
+        if not pcm or len(pcm) > AUDIO_MAX_OPUS_BYTES:
+            return None
+    elif not pcm or len(pcm) > AUDIO_MAX_FRAME_BYTES or len(pcm) % 4:
+        return None
+    return {"dir": data["dir"], "seq": data["seq"], "pcm": pcm, "format": fmt}
 
 
 def read_audio_stop(message):
@@ -1444,6 +1460,35 @@ def read_audio_config(message):
     return None if host is None else {"mode": "fixed", "host": host}
 
 
+def audio_alert_msg(kind: str) -> dict:
+    """Ask the peer to play its own system sound `kind`; no audio is streamed."""
+    return {"type": MSG_AUDIO_ALERT, "data": {"kind": kind}}
+
+
+def read_audio_alert(message):
+    """{kind} of an `audio_alert` whose kind is on the allow-list, else None."""
+    parsed = read_message(message)
+    if parsed is None or parsed[0] != MSG_AUDIO_ALERT or not _one_of(parsed[1].get("kind"), AUDIO_ALERT_KINDS):
+        return None
+    return {"kind": parsed[1]["kind"]}
+
+
+def audio_volume_msg(level: float, muted: bool) -> dict:
+    """The sender's default output volume (0..1) and mute."""
+    return {"type": MSG_AUDIO_VOLUME, "data": {"level": round(float(level), 3), "muted": bool(muted)}}
+
+
+def read_audio_volume(message):
+    """{level, muted} of an `audio_volume`, or None. NaN, infinity and out-of-range levels are refused."""
+    parsed = read_message(message)
+    if parsed is None or parsed[0] != MSG_AUDIO_VOLUME:
+        return None
+    level, muted = parsed[1].get("level"), parsed[1].get("muted")
+    if type(muted) is not bool or type(level) not in (int, float) or not (0.0 <= level <= 1.0):
+        return None
+    return {"level": float(level), "muted": muted}
+
+
 def read_audio(message):
     """(kind, fields) of any audio message that is well formed and within the limits, else None."""
     kind = message.get("type") if isinstance(message, dict) else None
@@ -1455,6 +1500,10 @@ def read_audio(message):
         fields = read_audio_stop(message)
     elif kind == MSG_AUDIO_CONFIG:
         fields = read_audio_config(message)
+    elif kind == MSG_AUDIO_ALERT:
+        fields = read_audio_alert(message)
+    elif kind == MSG_AUDIO_VOLUME:
+        fields = read_audio_volume(message)
     else:
         return None
     return None if fields is None else (kind, fields)

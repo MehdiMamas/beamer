@@ -53,7 +53,7 @@ SEND_CHUNK = 65536
 _CAP_FOR = {protocol.MSG_GESTURE: "gestures", protocol.MSG_TEXT: "text", protocol.MSG_SETTINGS: "settings",
             protocol.MSG_IDENTIFY_SCREENS: "identify_screens", protocol.MSG_AUDIO_WANT: "audio",
             protocol.MSG_AUDIO_START: "audio", protocol.MSG_AUDIO_DATA: "audio", protocol.MSG_AUDIO_STOP: "audio",
-            protocol.MSG_AUDIO_CONFIG: "audio"}
+            protocol.MSG_AUDIO_CONFIG: "audio", protocol.MSG_AUDIO_ALERT: "audio", protocol.MSG_AUDIO_VOLUME: "audio"}
 
 
 class LinkEnded(Exception):
