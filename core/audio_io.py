@@ -24,6 +24,9 @@ FRAME_SAMPLES = RATE * FRAME_MS // 1000
 VIRTUAL_CABLES = {"win32": ("CABLE Input",), "darwin": ("BlackHole",)}
 LOOPBACK_DEVICES = {"darwin": ("BlackHole",)}
 LINUX_SINK = "beamer_mic"
+APPS_SINK = "beamer_apps"       # Linux: the null sink the chosen programs are moved to
+MAX_APPS = 32
+ROUTE_EVERY = 100               # frames between looks for new streams of the chosen programs (2 s)
 
 
 class AudioUnavailable(Exception):
@@ -125,25 +128,146 @@ class LinuxVirtualMic:
                 LOGGER.warning("could not unload audio module %s", module)
 
 
+def parse_sink_inputs(text: str) -> list:
+    """The output of `pactl list sink-inputs` as [(index, {property: value})]."""
+    streams, current = [], None
+    for line in (text or "").splitlines():
+        match = re.match(r"Sink Input #(\d+)", line)
+        if match:
+            current = (int(match.group(1)), {})
+            streams.append(current)
+        elif current is not None:
+            pair = re.match(r'\s+([\w.\-]+) = "(.*)"\s*$', line)
+            if pair:
+                current[1][pair.group(1)] = pair.group(2)
+    return streams
+
+
+def matches_app(properties: dict, names) -> bool:
+    """True when a stream's application name, program binary or media name holds one of `names`."""
+    wanted = [name.strip().lower() for name in names if name and name.strip()]
+    if not wanted:
+        return False
+    fields = [properties.get(key, "").lower() for key in
+              ("application.name", "application.process.binary", "application.id")]
+    return any(name in field for name in wanted for field in fields if field)
+
+
+class LinuxAppRouter:
+    """Sends the sound of chosen programs to a null sink of its own, so capturing that sink's monitor
+    gives only those programs. `route()` moves the matching streams (and is called again from time
+    to time, because a program opens a new stream for each sound); `unload()` puts them back."""
+
+    def __init__(self, names, run=subprocess.run) -> None:
+        self._names = [name for name in list(names)[:MAX_APPS] if isinstance(name, str)]
+        self._run = run
+        self._module = None
+        self._moved = set()
+
+    def load(self) -> str:
+        """Create the sink and return the name of its monitor."""
+        if not self._names:
+            raise AudioUnavailable("no programs are chosen for sound sharing")
+        module = _pactl(["load-module", "module-null-sink", "sink_name=" + APPS_SINK,
+                         "sink_properties=device.description=Beamer_Programs"], self._run)
+        if not re.fullmatch(r"\d+", module):
+            raise AudioUnavailable("pactl gave an unexpected module id")
+        self._module = module
+        self.route()
+        return APPS_SINK + ".monitor"
+
+    def route(self) -> int:
+        """Move every stream of a chosen program that is not yet on the sink. Returns how many moved."""
+        moved = 0
+        try:
+            streams = parse_sink_inputs(_pactl(["list", "sink-inputs"], self._run))
+        except AudioUnavailable:
+            return 0
+        for index, properties in streams:
+            if index in self._moved or not matches_app(properties, self._names):
+                continue
+            try:
+                _pactl(["move-sink-input", str(index), APPS_SINK], self._run)
+            except AudioUnavailable:
+                continue
+            self._moved.add(index)
+            moved += 1
+        return moved
+
+    def unload(self) -> None:
+        for index in sorted(self._moved):
+            try:
+                _pactl(["move-sink-input", str(index), "@DEFAULT_SINK@"], self._run)
+            except AudioUnavailable:
+                pass     # the stream is gone already
+        self._moved.clear()
+        module, self._module = self._module, None
+        if module:
+            try:
+                _pactl(["unload-module", module], self._run)
+            except AudioUnavailable:
+                LOGGER.warning("could not unload audio module %s", module)
+
+
+class _RoutedSource(_Source):
+    """A loopback source of the router's sink that keeps looking for new streams of the chosen programs."""
+
+    def __init__(self, recorder, numpy, channels: int, router: LinuxAppRouter) -> None:
+        super().__init__(recorder, numpy, channels)
+        self._router, self._reads = router, 0
+
+    def read(self) -> bytes:
+        self._reads += 1
+        if self._reads % ROUTE_EVERY == 0:
+            self._router.route()
+        return super().read()
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            self._router.unload()
+
+
 class SoundcardBackend:
     """Real devices through `soundcard`: WASAPI loopback on Windows, a PulseAudio or PipeWire monitor
     on Linux. macOS cannot capture what it plays, so "loopback" there needs a loopback device
     (BlackHole) chosen as the output the system plays to."""
 
-    def __init__(self, platform: str = None, run=subprocess.run) -> None:
+    def __init__(self, platform: str = None, run=subprocess.run, apps=None) -> None:
         self.platform = platform or sys.platform
         self._run = run
+        self._apps = apps       # a list of program names, or a function returning it; empty means everything
+
+    def app_names(self) -> list:
+        names = self._apps() if callable(self._apps) else self._apps
+        return [name for name in (names or []) if isinstance(name, str) and name.strip()]
 
     def _key(self) -> str:
         return "darwin" if self.platform == "darwin" else "win32" if self.platform.startswith("win") else "linux"
 
     def open_source(self, kind: str):
+        if kind == "loopback" and self.app_names() and self._key() != "linux":
+            raise AudioUnavailable("sharing the sound of chosen programs works on Linux only; "
+                                   "clear the program list to share all of this computer's sound")
         sc, np = _load()
         try:
             if kind == "mic":
                 device, channels = sc.default_microphone(), 1
                 if device is None:
                     raise AudioUnavailable("no microphone found")
+            elif kind == "loopback" and self.app_names():
+                channels = 2
+                router = LinuxAppRouter(self.app_names(), self._run)
+                try:
+                    monitor = router.load()
+                    device = sc.get_microphone(monitor, include_loopback=True)
+                    recorder = device.recorder(samplerate=RATE, channels=channels, blocksize=FRAME_SAMPLES)
+                    recorder.__enter__()
+                except Exception:
+                    router.unload()
+                    raise
+                return _RoutedSource(recorder, np, channels, router)
             elif kind == "loopback":
                 channels = 2
                 if self._key() == "darwin":
