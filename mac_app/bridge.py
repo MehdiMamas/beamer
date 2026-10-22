@@ -41,7 +41,7 @@ from core import peerlist
 from core import protocol
 from core import special_keys
 from core import receiver
-from core import audio, audio_io
+from core import audio, audio_codec, audio_io, audio_system
 from core import settings_sync
 from core import ways
 from core.i18n import N_, tr
@@ -84,6 +84,8 @@ OWN_PLATFORM = "macos"
 CAPABILITIES = ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "ping_rtt", "identify_screens", "motion_path")
 if audio_io.available():
     CAPABILITIES += ("audio",)
+    if audio_codec.available():
+        CAPABILITIES += ("audio_opus",)
 MEDIA_KEY_NAMES = frozenset({"volume_mute", "volume_down", "volume_up", "media_next", "media_prev", "media_stop", "media_play_pause", "brightness_up", "brightness_down"})
 
 # Why input came home, in words, for the alert. A why that is not here comes home quietly.
@@ -621,7 +623,18 @@ class KVMController:
             me=lambda: protocol.id_text(self.identity()["id"]),
             want_sound=lambda: bool(getattr(self.cfg, "audio_play_remote", False)),
             want_mic=lambda: bool(getattr(self.cfg, "audio_share_mic", False)),
-            config=lambda: (getattr(self.cfg, "audio_mode", "follow"), getattr(self.cfg, "audio_host", "")))
+            config=lambda: (getattr(self.cfg, "audio_mode", "follow"), getattr(self.cfg, "audio_host", "")),
+            want_opus=lambda: bool(getattr(self.cfg, "audio_opus", False)),
+            want_echo_cancel=lambda: bool(getattr(self.cfg, "audio_echo_cancel", False)),
+            apps=lambda: list(getattr(self.cfg, "audio_apps", []) or []),
+            want_alerts=lambda: bool(getattr(self.cfg, "audio_alerts", False)),
+            play_alert=audio_system.play_alert,
+            want_volume=lambda: bool(getattr(self.cfg, "audio_sync_volume", False)),
+            apply_volume=lambda level, muted: self.volume_sync.apply(level, muted))
+        self.volume_sync = audio_system.VolumePoller(
+            audio_system.VolumeControl(), self.audio.send_volume,
+            enabled=lambda: bool(getattr(self.cfg, "audio_sync_volume", False)))
+        self.volume_sync.start()
         self.stop_event = threading.Event()
         self.outbound = queue.Queue(maxsize=OUTBOUND_QUEUE_SIZE)
         self.on_user_alert = None
@@ -1257,6 +1270,7 @@ class KVMController:
 
     def stop(self):
         self.audio.close()
+        self.volume_sync.close()
         self.idle_pointer.cancel()
         self._return_local()
         # The let-go and what is ahead of it may be waiting behind a clipboard read: sent first.

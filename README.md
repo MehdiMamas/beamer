@@ -164,13 +164,35 @@ the **Audio host**:
   always sends its microphone to all of them, wherever the input is. If two computers disagree,
   the one with a fixed host wins.
 
+Also in the Audio section of the settings, each behind its own switch and each working with a
+computer that lacks it:
+
+- **Opus** (on by default when available): compresses the sound to about 64 to 128 kbit/s. Needs
+  the optional `opuslib` package and libopus on both computers; if either lacks it the sound is
+  sent uncompressed.
+- **Two-way sound with echo cancellation** (on by default): when sound and microphone are both
+  shared, what this computer plays is taken out of its microphone before it is sent.
+- **Only some programs** (Linux): list program names (for example `firefox, spotify`) and only
+  their sound is shared. This works with PulseAudio or PipeWire (`pactl`). On Windows and macOS it
+  is not available and the whole sound is shared.
+- **Alert sounds** (off by default): when Beamer itself beeps (for example a refused switch), the
+  other computer plays its own system alert sound. It sends a name, not sound. Desktop
+  notification sounds are not detected or forwarded.
+- **Volume and mute sync** (off by default): the output volume and mute follow between the
+  computers. On Windows this needs the optional `pycaw` package; on a Mac it uses `osascript`, on
+  Linux `pactl`.
+- **Media keys** (play/pause, next, previous, stop, volume) already go to the computer that has
+  the input; nothing to turn on.
+- **Output follows the cursor**: the default Audio host mode, Follow the input, already does this;
+  the sound is played on the computer you are at while the input is on the other one.
+
 It needs the optional packages `soundcard` and `numpy` (`pip install soundcard numpy`); without
 them everything else works and audio stays off. To use the microphone in programs on the other
 computer you need a virtual cable: [VB-CABLE](https://vb-audio.com/Cable/) ("CABLE Input") on
 Windows, [BlackHole](https://existential.audio/blackhole/) on a Mac (which also lets a Mac share its
 own sound), and on Linux Beamer makes a PulseAudio/PipeWire null sink (`pactl`) itself. Not done
-yet: echo cancellation, compression, per-app routing, volume sync and muting the other
-computer's own speakers; wear the headset on the computer you sit at.
+yet: muting the other computer's own speakers (wear the headset on the computer you sit at),
+per-program sound on Windows and macOS, and forwarding desktop notification sounds.
 
 ## Settings
 

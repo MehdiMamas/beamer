@@ -1559,6 +1559,10 @@ class ControlWindow(AppKit.NSObject):
         self.pointer_box.value = raw["hide_idle_pointer"]
         self.audio_play_box.value = bool(raw.get("audio_play_remote"))
         self.audio_mic_box.value = bool(raw.get("audio_share_mic"))
+        self.audio_opus_box.value = bool(raw.get("audio_opus", True))
+        self.audio_echo_box.value = bool(raw.get("audio_echo_cancel", True))
+        self.audio_alerts_box.value = bool(raw.get("audio_alerts"))
+        self.audio_volume_box.value = bool(raw.get("audio_sync_volume"))
         self.audio_host_box.value = raw.get("audio_mode") == "fixed" and raw.get("audio_host") == raw.get("machine_id")
         self.modifier_select.value = raw["key_map"] if isinstance(raw["key_map"], str) else "custom"
         crossing_raw = raw["crossing"]
@@ -3320,6 +3324,22 @@ class ControlWindow(AppKit.NSObject):
         self.audio_host_box = widgets.Switch(tr("Make this Mac the audio host"), on_change=self._set_audio_host)
         self.audio_host_box.value = self.controller.cfg.audio_mode == "fixed"
         module.add(self.audio_host_box.view)
+        self.audio_opus_box = widgets.Switch(tr("Compress sound with Opus when both computers can"), on_change=lambda on: self._set_audio(audio_opus=bool(on)))
+        self.audio_opus_box.value = self.controller.cfg.audio_opus
+        module.add(self.audio_opus_box.view)
+        self.audio_echo_box = widgets.Switch(tr("Cancel the echo when sound and microphone are both shared"), on_change=lambda on: self._set_audio(audio_echo_cancel=bool(on)))
+        self.audio_echo_box.value = self.controller.cfg.audio_echo_cancel
+        module.add(self.audio_echo_box.view)
+        self.audio_alerts_box = widgets.Switch(tr("Play this computer's alert sounds on the other computer"), on_change=lambda on: self._set_audio(audio_alerts=bool(on)))
+        self.audio_alerts_box.value = self.controller.cfg.audio_alerts
+        module.add(self.audio_alerts_box.view)
+        self.audio_volume_box = widgets.Switch(tr("Keep the output volume and mute the same on both computers"), on_change=lambda on: self._set_audio(audio_sync_volume=bool(on)))
+        self.audio_volume_box.value = self.controller.cfg.audio_sync_volume
+        module.add(self.audio_volume_box.view)
+        module.add(widgets.note(tr(
+            "Sharing only some programs' sound is not supported on macOS. Alert sounds play the other computer's own "
+            "sound when Beamer itself beeps; they are not a copy of its desktop notifications. Opus needs the optional opuslib package."
+        )).view)
         module.add(widgets.note(tr(
             "Sound follows the input: while another computer has it, its sound plays here and this mic plays there. "
             "As the audio host, this Mac plays every computer's sound and shares its mic with all of them, wherever the input is. "
@@ -5662,6 +5682,10 @@ class TrayApp(rumps.App):
             AppKit.NSBeep()
         except Exception:
             self.logger.exception("failed to beep for a user alert")
+        try:
+            self.controller.audio.send_alert("error")
+        except Exception:
+            self.logger.exception("failed to send the alert sound")
         try:
             self.notices.post(title, pages.redact(message, self.controller.cfg.hide_addresses))
         except Exception:

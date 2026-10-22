@@ -488,6 +488,7 @@ Capabilities say what a machine does with a message it receives:
 | `displays` | with `layout`, it sends and receives each machine's logical display rectangles and display-targeted edges |
 | `ping_rtt` | it sends and answers response-time probes on `ping` in both directions |
 | `audio` | it takes the `audio_*` messages ("Audio", section 5) |
+| `audio_opus` | with `audio`, it can encode and decode Opus (`format` `opus`); only then does a peer ask it for Opus |
 
 A sender does not send a message its peer's capabilities do not cover. A receiver that gets one
 anyway drops it, and still acknowledges it when it carries a `seq`.
@@ -910,7 +911,7 @@ names a machine sends input there, from home or straight from the machine it is 
 
 ### Audio
 
-Optional and off until a user turns it on. Five messages, all gated by the `audio` capability, so a
+Optional and off until a user turns it on. Seven messages, all gated by the `audio` capability, so a
 peer without it is never sent one. Each carries `dir`: `out` is the system sound of the guest
 (the machine that is not the audio host), played on the host; `mic` is the host's microphone,
 played on the guest into a virtual input device.
@@ -920,14 +921,34 @@ played on the guest into a virtual input device.
 | `audio_config` | `mode` (`follow` or `fixed`), `host` (a 16-byte id as text, only with `fixed`) | both, when a link comes up and when the setting changes, before any other audio message |
 | `audio_want` | `dir`, `rate`, `channels`, `format`, `frame_ms` | host: asks the guest to start sending `out` |
 | `audio_start` | the same fields | the sender of a stream, before its first `audio_data` |
-| `audio_data` | `dir`, `seq` (0 to 2^32-1, wrapping), `pcm` (base64) | the sender of a stream, one frame each |
+| `audio_data` | `dir`, `seq` (0 to 2^32-1, wrapping), `pcm` (base64); `format` (optional, `s16le` when absent) | the sender of a stream, one frame each |
 | `audio_stop` | `dir`, optional `reason` | either end |
+| `audio_alert` | `kind` (`default`, `error` or `notify`) | any linked peer; no stream needed |
+| `audio_volume` | `level` (number 0 to 1), `muted` (boolean) | any linked peer, when its default output volume or mute changes |
 
-- Allow-lists: `rate` 48000; `channels` 1 or 2 (`out` 2, `mic` 1); `format` `s16le`; `frame_ms` 20.
+- Allow-lists: `rate` 48000; `channels` 1 or 2 (`out` 2, `mic` 1); `format` `s16le` or `opus`; `frame_ms` 20.
   Anything else is dropped. A new `format` is a new allow-list entry, not a new message.
 - `pcm` is whole samples (a multiple of 4 bytes), 1 to 64 KiB. Frames are not acknowledged and
   are never resent; the receiver keeps a short jitter buffer (60 ms, at most 400 ms), plays them
   in `seq` order, fills a gap with silence and drops a late or repeated one.
+- **Opus.** A machine asks for (or starts) an `opus` stream only when its setting is on, its codec
+  loads and the peer lists `audio_opus`; otherwise the stream is `s16le`, as before. The
+  `format` of `audio_want` / `audio_start` is what the stream is; an `audio_data` whose `format`
+  differs from it, or an Opus frame that does not decode, is dropped. A machine that is sent an
+  Opus stream it cannot decode answers `audio_stop` with reason `format`. An Opus `pcm` is one
+  20 ms packet of 1 to 4000 bytes (not a multiple of 4); the 64 KiB limit applies to every frame.
+  The bit rate is the sender's choice (about 64 to 128 kbit/s for stereo).
+- **`audio_alert`** asks the peer to play its own local system sound (Windows `MessageBeep`, Mac
+  `afplay` or an `osascript` beep, Linux `canberra-gtk-play` or `paplay`). It carries no sound and
+  is only a name from the fixed list; any other `kind` is dropped. The receiver plays it only if
+  its own alert setting is on. The sender sends one when Beamer itself would beep (a refused
+  switch); it does not forward desktop notifications.
+- **`audio_volume`** carries the sender's default output volume and mute. The receiver applies it
+  only if its own volume-sync setting is on, and treats the applied value as its baseline, so a
+  value it just received is not sent back. A `level` outside 0 to 1, NaN or a non-boolean `muted`
+  is dropped. The sender looks at its volume about every 500 ms and sends only a change.
+- Media keys (play/pause, next, previous, stop, volume up/down/mute) are not audio messages: they
+  travel as key events with the `media_keys` capability, to the machine that has the input.
 - **Follow** (the default): the host is the machine the input is on. While input is on B, B is
   the guest of A: its `out` is played on A and A's `mic` on B. When input returns to A, both
   streams stop (`audio_stop`) and B's own output is as it was.
@@ -940,8 +961,12 @@ played on the guest into a virtual input device.
   is neither end of the link means no audio on that link.
 - A machine that cannot open a device answers with `audio_stop` and a `reason`; the link and
   everything else carry on.
-- Not in this version: echo cancellation, Opus, per-app routing, volume sync, media keys, muting
-  the guest's own speakers.
+- **Echo cancellation** is local to a machine and not on the wire: when it plays the other's sound
+  and sends its own microphone, it removes what it played from the microphone before sending.
+- **Per-program sound** is local too: on Linux the chosen programs' streams are moved to a null
+  sink of Beamer's and its monitor is sent as `out`. It changes no message.
+- Not in this version: muting the guest's own speakers; per-program sound on Windows and macOS;
+  forwarding desktop notification sounds.
 
 ### A phone
 

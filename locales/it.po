@@ -1750,6 +1750,22 @@ msgstr "Usa questo microfono sull'altro computer"
 msgid "Make this Mac the audio host"
 msgstr "Usa questo Mac come host audio"
 
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Compress sound with Opus when both computers can"
+msgstr "Comprimi l'audio con Opus quando entrambi i computer possono"
+
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Cancel the echo when sound and microphone are both shared"
+msgstr "Elimina l'eco quando audio e microfono sono entrambi condivisi"
+
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Play this computer's alert sounds on the other computer"
+msgstr "Riproduci i suoni di avviso di questo computer sull'altro computer"
+
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Keep the output volume and mute the same on both computers"
+msgstr "Mantieni uguali volume di uscita e muto sui due computer"
+
 # New in 1.5.5: awaiting Lorenzo's check
 #: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
 msgid "Same ways on every machine"
@@ -2342,6 +2358,10 @@ msgstr "Collegamento"
 #: mac_app/kvm_bridge_app.py
 msgid "This Mac's pointer always hides while it drives another machine. On, it also hides after another machine stops driving it, until its own mouse or trackpad moves."
 msgstr "Il puntatore di questo Mac si nasconde sempre mentre controlla un altro computer. Se attivo, si nasconde anche dopo che un altro computer smette di controllarlo, finché il suo mouse o trackpad non si muove."
+
+#: mac_app/kvm_bridge_app.py
+msgid "Sharing only some programs' sound is not supported on macOS. Alert sounds play the other computer's own sound when Beamer itself beeps; they are not a copy of its desktop notifications. Opus needs the optional opuslib package."
+msgstr "Condividere solo l'audio di alcuni programmi non è supportato su macOS. I suoni di avviso riproducono il suono proprio dell'altro computer quando è Beamer stesso a emettere un segnale; non sono una copia delle sue notifiche del desktop. Opus richiede il pacchetto opzionale opuslib."
 
 #: mac_app/kvm_bridge_app.py
 msgid "Sound follows the input: while another computer has it, its sound plays here and this mic plays there. As the audio host, this Mac plays every computer's sound and shares its mic with all of them, wherever the input is. Needs the soundcard package; capturing this Mac's sound or playing the mic into a program needs BlackHole."
@@ -4439,6 +4459,10 @@ msgid "This PC's pointer hides while it drives another machine, and after anothe
 msgstr "Il puntatore di questo PC si nasconde mentre controlla un altro computer, e dopo che un altro computer smette di controllarlo, finché il suo mouse non si muove."
 
 #: win_app/kvm_bridge_win.py
+msgid "firefox, spotify"
+msgstr "firefox, spotify"
+
+#: win_app/kvm_bridge_win.py
 msgid "Follow the input: while another computer has this one's keyboard and mouse, its sound plays on this PC and this PC's microphone plays there. A fixed host: every computer's sound plays on the host and the host's microphone plays on every other computer, wherever the input is. Needs the optional soundcard package; the microphone also needs a virtual audio cable on the computer it plays on."
 msgstr "Segui l'input: mentre un altro computer usa tastiera e mouse di questo, il suo audio viene riprodotto su questo PC e il microfono di questo PC viene riprodotto là. Host fisso: l'audio di ogni computer viene riprodotto sull'host e il microfono dell'host su tutti gli altri computer, ovunque sia l'input. Serve il pacchetto opzionale soundcard; il microfono richiede anche un cavo audio virtuale sul computer in cui viene riprodotto."
 
@@ -4641,6 +4665,10 @@ msgid "Delay:"
 msgstr "Ritardo:"
 
 #: win_app/kvm_bridge_win.py
+msgid "Sharing only some programs' sound works on Linux (PulseAudio or PipeWire). On Windows and macOS this computer's whole sound is shared. Alert sounds play the other computer's own sound when Beamer itself beeps; they are not a copy of its desktop notifications. Opus needs the optional opuslib package."
+msgstr "Condividere solo l'audio di alcuni programmi funziona su Linux (PulseAudio o PipeWire). Su Windows e macOS viene condiviso tutto l'audio di questo computer. I suoni di avviso riproducono il suono proprio dell'altro computer quando è Beamer stesso a emettere un segnale; non sono una copia delle sue notifiche del desktop. Opus richiede il pacchetto opzionale opuslib."
+
+#: win_app/kvm_bridge_win.py
 msgid "Start at sign-in needs the same administrator account that runs Beamer."
 msgstr "L'avvio all'accesso richiede lo stesso account amministratore che esegue Beamer."
 
@@ -4742,6 +4770,10 @@ msgstr "Aggiorna tramite il tuo gestore software."
 #: win_app/kvm_bridge_win.py
 msgid "Audio host"
 msgstr "Host audio"
+
+#: win_app/kvm_bridge_win.py
+msgid "Only share the sound of these programs"
+msgstr "Condividi solo l'audio di questi programmi"
 
 #: win_app/kvm_bridge_win.py
 msgid "Starts elevated at sign-in without a UAC prompt, so Beamer can send input to administrator apps."

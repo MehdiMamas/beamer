@@ -76,7 +76,7 @@ from effect_overlay import EffectOverlay, desktop_box, logical_point
 from effect_overlay_x11 import EffectOverlayX11Proxy, available as xwayland_available
 from identify_overlay import IdentifyScreens
 from effect_previews import EffectStill, SwitchStill, TileHover
-from core import audio, audio_io
+from core import audio, audio_codec, audio_io, audio_system
 from core import idle_pointer
 from core import ignored
 import motion
@@ -696,7 +696,18 @@ class WindowsApplication(QWidget):
             want_sound=lambda: bool(self._config and self._config.audio_play_remote),
             want_mic=lambda: bool(self._config and self._config.audio_share_mic),
             config=lambda: (self._config.audio_mode, self._config.audio_host) if self._config else ("follow", ""),
+            want_opus=lambda: bool(self._config and self._config.audio_opus),
+            want_echo_cancel=lambda: bool(self._config and self._config.audio_echo_cancel),
+            apps=lambda: list(self._config.audio_apps) if self._config else [],
+            want_alerts=lambda: bool(self._config and self._config.audio_alerts),
+            play_alert=audio_system.play_alert,
+            want_volume=lambda: bool(self._config and self._config.audio_sync_volume),
+            apply_volume=lambda level, muted: self.volume_sync.apply(level, muted),
         )
+        self.volume_sync = audio_system.VolumePoller(
+            audio_system.VolumeControl(), self.audio.send_volume,
+            enabled=lambda: bool(self._config and self._config.audio_sync_volume))
+        self.volume_sync.start()
         self.sender.audio_callback = self.audio.receive
         self.sender.moved_callback = self.audio.input_moved
         self.sender.paired_callback = self._store_paired
@@ -1317,6 +1328,27 @@ class WindowsApplication(QWidget):
         self.audio_host_choice.setMaximumWidth(320)
         self.audio_host_choice.currentIndexChanged.connect(self._audio_host_chosen)
         module.body.addWidget(self._row(widgets.label(tr("Audio host"), "key"), self.audio_host_choice))
+        self.audio_opus_switch = widgets.Switch(tr("Compress sound with Opus when both computers can"))
+        self.audio_echo_switch = widgets.Switch(tr("Cancel the echo when sound and microphone are both shared"))
+        self.audio_alerts_switch = widgets.Switch(tr("Play this computer's alert sounds on the other computer"))
+        self.audio_volume_switch = widgets.Switch(tr("Keep the output volume and mute the same on both computers"))
+        for switch, name in ((self.audio_opus_switch, "audio_opus"), (self.audio_echo_switch, "audio_echo_cancel"),
+                             (self.audio_alerts_switch, "audio_alerts"), (self.audio_volume_switch, "audio_sync_volume")):
+            switch.setFont(theme.font(theme.TYPE["body"]))
+            switch.setChecked(bool(getattr(self._config, name)) if self._config else name in ("audio_opus", "audio_echo_cancel"))
+            switch.toggled.connect(lambda on, name=name: self._set_audio(name, on))
+            module.body.addWidget(switch)
+        self.audio_apps_edit = QLineEdit()
+        self.audio_apps_edit.setMaximumWidth(320)
+        self.audio_apps_edit.setPlaceholderText(tr("firefox, spotify"))
+        self.audio_apps_edit.setText(", ".join(self._config.audio_apps) if self._config else "")
+        self.audio_apps_edit.editingFinished.connect(self._audio_apps_edited)
+        module.body.addWidget(self._row(widgets.label(tr("Only share the sound of these programs"), "key"), self.audio_apps_edit))
+        module.body.addWidget(widgets.label(
+            tr("Sharing only some programs' sound works on Linux (PulseAudio or PipeWire). On Windows and macOS this "
+               "computer's whole sound is shared. Alert sounds play the other computer's own sound when Beamer itself "
+               "beeps; they are not a copy of its desktop notifications. Opus needs the optional opuslib package."),
+            "note", wrap=True))
         audio_note = widgets.label(
             tr("Follow the input: while another computer has this one's keyboard and mouse, its sound plays on this PC "
             "and this PC's microphone plays there. A fixed host: every computer's sound plays on the host and the "
@@ -1406,6 +1438,7 @@ class WindowsApplication(QWidget):
                 "Cannot switch — {name} could not be reached",
                 "Cannot switch — on this desktop input goes to another machine only by pushing the pointer through an edge"):
             QApplication.beep()
+            self.audio.send_alert("error")
         if sys.platform.startswith("linux"):
             import portal
 
@@ -1937,8 +1970,9 @@ class WindowsApplication(QWidget):
             "platform": OWN_PLATFORM,
             "app": VERSION[:32] if VERSION.isascii() and VERSION.isprintable() else "dev",
             # A swipe has no shortcut every Linux desktop shares, so Linux does not offer gestures.
-            "caps": [cap for cap in ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "identify_screens", "ping_rtt", "motion_path", "audio")
-                     if not (cap == "gestures" and OWN_PLATFORM == "linux") and not (cap == "audio" and not audio_io.available())],
+            "caps": [cap for cap in ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "identify_screens", "ping_rtt", "motion_path", "audio", "audio_opus")
+                     if not (cap == "gestures" and OWN_PLATFORM == "linux") and not (cap == "audio" and not audio_io.available())
+                     and not (cap == "audio_opus" and not (audio_io.available() and audio_codec.available()))],
             "port": self._settings_port,
         }
 
@@ -3196,6 +3230,16 @@ class WindowsApplication(QWidget):
             return
         mode, host = self.audio_host_choice.currentData() or ("follow", "")
         self._config.audio_mode, self._config.audio_host = mode, host
+        self._persist()
+        self.audio.refresh()
+
+    def _audio_apps_edited(self) -> None:
+        if self._config is None:
+            return
+        names = [part.strip()[:64] for part in self.audio_apps_edit.text().split(",") if part.strip()][:32]
+        if names == list(self._config.audio_apps):
+            return
+        self._config.audio_apps = names
         self._persist()
         self.audio.refresh()
 
@@ -5115,7 +5159,8 @@ class WindowsApplication(QWidget):
         set_divisor(effects.frame_divisor(config.frame_rate))
         for box in ( self.dragging_switch, self.hold_switch, self.glow_toggle,
                     self.landing_toggle, self.tray_switch, self.pointer_switch,
-                    self.audio_play_switch, self.audio_mic_switch,
+                    self.audio_play_switch, self.audio_mic_switch, self.audio_opus_switch, self.audio_echo_switch,
+                    self.audio_alerts_switch, self.audio_volume_switch,
                     self.resistance_slider, self.double_tap_slider):
             box.blockSignals(True)
         try:
@@ -5124,6 +5169,11 @@ class WindowsApplication(QWidget):
             self.pointer_switch.setChecked(config.hide_idle_pointer)
             self.audio_play_switch.setChecked(config.audio_play_remote)
             self.audio_mic_switch.setChecked(config.audio_share_mic)
+            self.audio_opus_switch.setChecked(config.audio_opus)
+            self.audio_echo_switch.setChecked(config.audio_echo_cancel)
+            self.audio_alerts_switch.setChecked(config.audio_alerts)
+            self.audio_volume_switch.setChecked(config.audio_sync_volume)
+            self.audio_apps_edit.setText(", ".join(config.audio_apps))
             self._refresh_audio_host()
             self.dragging_switch.setChecked(config.block_while_dragging)
             self.hold_switch.setChecked(config.hold_full_screen)
@@ -5135,7 +5185,8 @@ class WindowsApplication(QWidget):
         finally:
             for box in ( self.dragging_switch, self.hold_switch, self.glow_toggle,
                         self.landing_toggle, self.tray_switch, self.pointer_switch,
-                        self.audio_play_switch, self.audio_mic_switch,
+                        self.audio_play_switch, self.audio_mic_switch, self.audio_opus_switch, self.audio_echo_switch,
+                        self.audio_alerts_switch, self.audio_volume_switch,
                         self.resistance_slider, self.double_tap_slider):
                 box.blockSignals(False)
         self._crossing_text(self.resistance_readout, f"{config.crossing_resistance_px} px")
@@ -5526,6 +5577,7 @@ class WindowsApplication(QWidget):
         self._closing = True
         self.identify_screens.stop()
         self.audio.close()
+        self.volume_sync.close()
         self.refresh_timer.stop()
         self.update_checker.stop()
         if self.pairing is not None:

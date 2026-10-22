@@ -132,8 +132,10 @@ class VolumePoller:
     A value the peer sent is passed to `applied()` before it is set locally, which makes it the new
     baseline: the next poll sees no change, so a volume that came from the peer is never sent back."""
 
-    def __init__(self, control: VolumeControl, on_change: Callable[[float, bool], None], interval: float = POLL_SECONDS) -> None:
+    def __init__(self, control: VolumeControl, on_change: Callable[[float, bool], None], interval: float = POLL_SECONDS,
+                 enabled: Callable[[], bool] = lambda: True) -> None:
         self._control, self._on_change, self._interval = control, on_change, interval
+        self._enabled = enabled
         self._last: Optional[Tuple[float, bool]] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -173,7 +175,10 @@ class VolumePoller:
 
     def _loop(self) -> None:
         while not self._stop.wait(self._interval):
-            self.poll()
+            if self._enabled():
+                self.poll()
+            else:
+                self._last = None       # looked at again from scratch when it is switched back on
 
     def close(self) -> None:
         self._stop.set()

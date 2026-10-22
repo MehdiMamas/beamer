@@ -7,3 +7,5 @@ segno>=1.6
 # Optional, for the audio feature (README, Audio): install with pip to turn it on. Without it the app runs and audio stays off.
 # soundcard>=0.4.3
 # numpy>=1.26
+# opuslib>=3.0.1   (also needs libopus: compresses shared sound)
+# pycaw>=20230407   (Windows: keeps the output volume in step with the other computer)
