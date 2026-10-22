@@ -9,3 +9,6 @@ six==1.17.0
 # dependencies), with fd passing for libei's connection and the clipboard's transfers. libei and
 # libxkbcommon are the system's, reached through ctypes (win_app/libei.py, xkb_x11.py).
 jeepney==0.9.0
+# Optional, for the audio feature (README, Audio): install with pip to turn it on. Without it the app runs and audio stays off.
+# soundcard>=0.4.3
+# numpy>=1.26

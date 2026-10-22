@@ -6,3 +6,6 @@ rumps==0.4.0
 py2app==0.28.10
 PyNaCl>=1.6
 dmgbuild==1.6.7
+# Optional, for the audio feature (README, Audio): install with pip to turn it on. Without it the app runs and audio stays off.
+# soundcard>=0.4.3
+# numpy>=1.26
