@@ -904,6 +904,72 @@ class ClipboardSyncTests(unittest.TestCase):
         self.assertEqual(link.types(), [protocol.MSG_FOCUS, protocol.MSG_CLIPBOARD])
         self.assertEqual(link.posted[1], protocol.clipboard_msg("shot.png"))
 
+    def _files_clipboard(self, paths, text=None, image=None):
+        fake = FakeClipboard(text, image)
+        fake.paths, fake.files_set = list(paths), []
+        fake.read_files = lambda: fake.paths
+        fake.set_files = lambda found: fake.files_set.append(list(found)) or True
+        return fake
+
+    def test_copied_files_are_sent_to_a_peer_advertising_clipboard_files_and_drop_the_image(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "a.txt")
+            with open(path, "wb") as handle:
+                handle.write(b"abc")
+            controller = make_controller(self.clock)
+            link = bring_up(controller, caps=("clipboard", "clipboard_image", "clipboard_files"))
+            link.posted.clear()
+            controller.clipboard = self._files_clipboard([path], "a.txt", FAKE_PNG)
+            controller.set_redirecting(True)
+            settle(controller)
+            self.assertEqual(link.types(), [protocol.MSG_FOCUS, protocol.MSG_CLIPBOARD])
+            data = link.posted[1]["data"]
+            self.assertEqual([entry["path"] for entry in data["files"]], ["a.txt"])
+            self.assertNotIn("image", data)
+            self.assertEqual(data["text"], "a.txt")
+
+    def test_copied_files_are_not_sent_to_a_peer_without_clipboard_files(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "a.txt")
+            with open(path, "wb") as handle:
+                handle.write(b"abc")
+            controller = make_controller(self.clock)
+            link = bring_up(controller, caps=("clipboard", "clipboard_image"))
+            link.posted.clear()
+            controller.clipboard = self._files_clipboard([path], "a.txt", FAKE_PNG)
+            controller.set_redirecting(True)
+            settle(controller)
+            self.assertEqual(link.posted[1], protocol.clipboard_msg("a.txt", FAKE_PNG))
+
+    def test_inbound_files_are_stored_and_set_on_the_pasteboard(self):
+        import tempfile
+        from core import clipboard_files
+
+        fake = self._files_clipboard([])
+        self.controller.clipboard = fake
+        files = [{"path": "dir/b.txt", "data": "YWJj"}]
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(clipboard_files, "cache_root", return_value=root):
+            self._arrives_from_a_machine_just_let_go(protocol.clipboard_msg(None, None, files))
+            self.assertEqual(len(fake.files_set), 1)
+            top = fake.files_set[0][0]
+            self.assertEqual(os.path.basename(top), "dir")
+            with open(os.path.join(top, "b.txt"), "rb") as handle:
+                self.assertEqual(handle.read(), b"abc")
+        self.assertEqual(fake.set_calls, [])
+
+    def test_invalid_inbound_files_leave_the_text_in_place(self):
+        fake = self._files_clipboard([])
+        self.controller.clipboard = fake
+        bad = {"type": protocol.MSG_CLIPBOARD, "data": {"text": "t", "files": [{"path": "../x", "data": "YWJj"}]}}
+        self._arrives_from_a_machine_just_let_go(bad)
+        self.assertEqual(fake.files_set, [])
+        self.assertEqual(fake.set_calls, [("t", None)])
+
     def test_an_inbound_clipboard_sets_text_and_image(self):
         fake = FakeClipboard()
         self.controller.clipboard = fake

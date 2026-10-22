@@ -280,6 +280,65 @@ class TakingTests(unittest.TestCase):
         self.sender.set_redirecting(True)
         self.assertEqual(self.rig.sent(B, "clipboard"), [])
 
+    def _with_copied_files(self, rig, content=b"abc"):
+        import os
+        import tempfile
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = os.path.join(folder.name, "a.txt")
+        with open(path, "wb") as handle:
+            handle.write(content)
+        rig.clipboard.read_files = lambda: [path]
+        rig.clipboard.files_set = []
+        rig.clipboard.set_files = lambda found: rig.clipboard.files_set.append(list(found)) or True
+
+    def test_copied_files_go_to_a_peer_with_clipboard_files_and_without_the_image(self):
+        rig = Rig()
+        self._with_copied_files(rig)
+        rig.clipboard.image = pngs.png()
+        rig.sender.set_redirecting(True)
+        data = rig.sent(B, "clipboard")[0]["data"]
+        self.assertEqual([entry["path"] for entry in data["files"]], ["a.txt"])
+        self.assertNotIn("image", data)
+        self.assertEqual(data["text"], "here")
+
+    def test_copied_files_are_not_sent_to_a_peer_without_clipboard_files(self):
+        rig = Rig()
+        self._with_copied_files(rig)
+        rig.links.caps_of[B] = frozenset({"clipboard", "clipboard_image"})
+        rig.clipboard.image = pngs.png()
+        rig.sender.set_redirecting(True)
+        data = rig.sent(B, "clipboard")[0]["data"]
+        self.assertNotIn("files", data)
+        self.assertIn("image", data)
+
+    def test_files_past_the_limit_are_left_out_and_the_rest_still_goes(self):
+        rig = Rig()
+        self._with_copied_files(rig, b"x" * (8 * 1024 * 1024 + 1))
+        rig.sender.set_redirecting(True)
+        data = rig.sent(B, "clipboard")[0]["data"]
+        self.assertNotIn("files", data)
+        self.assertEqual(data["text"], "here")
+
+    def test_received_files_are_stored_and_set_as_a_file_list(self):
+        import os
+        import tempfile
+        from core import clipboard_files
+
+        rig = Rig()
+        self._with_copied_files(rig)
+        files = [{"path": "dir/b.txt", "data": "YWJj"}]
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(clipboard_files, "cache_root", return_value=root):
+            rig.sender._set_clipboard(protocol.clipboard_msg(None, None, files))
+            self.assertEqual(len(rig.clipboard.files_set), 1)
+            top = rig.clipboard.files_set[0][0]
+            self.assertEqual(os.path.basename(top), "dir")
+            with open(os.path.join(top, "b.txt"), "rb") as handle:
+                self.assertEqual(handle.read(), b"abc")
+        self.assertEqual(rig.clipboard.set_calls, [])
+
     def test_the_clipboard_is_not_sent_again_when_nothing_changed_here(self):
         self.sender.set_redirecting(True)
         self.rig.accept_take()
