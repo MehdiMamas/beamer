@@ -177,6 +177,13 @@ class Config:
     # Audio host: "follow" the input, or "fixed" on one machine ("" = this PC, else a peer id).
     audio_mode: str = "follow"
     audio_host: str = ""
+    # More audio, each its own choice: Opus (when both sides have it), echo cancellation (two-way),
+    # the programs whose sound is shared (Linux only), alert sounds, and output volume sync.
+    audio_opus: bool = True
+    audio_echo_cancel: bool = True
+    audio_apps: list = field(default_factory=list)
+    audio_alerts: bool = False
+    audio_sync_volume: bool = False
     # Linux on Wayland: a key combination bound through the desktop's GlobalShortcuts portal sends
     # input out while it is at home, where the double-tap cannot be seen. Off until chosen, since
     # turning it on asks the desktop's permission. This machine's own choice, never shared.
@@ -284,9 +291,12 @@ def validate_config(config: Config) -> None:
         raise ConfigError("show_in_tray must be true or false")
     if not isinstance(config.hide_idle_pointer, bool):
         raise ConfigError("hide_idle_pointer must be true or false")
-    for name in ("audio_play_remote", "audio_share_mic"):
+    for name in ("audio_play_remote", "audio_share_mic", "audio_opus", "audio_echo_cancel", "audio_alerts", "audio_sync_volume"):
         if not isinstance(getattr(config, name), bool):
             raise ConfigError(name + " must be true or false")
+    if (not isinstance(config.audio_apps, list) or len(config.audio_apps) > 32
+            or any(not isinstance(name, str) or not name.strip() or len(name) > 64 for name in config.audio_apps)):
+        raise ConfigError("audio_apps must be a list of at most 32 program names")
     if config.audio_mode not in protocol.AUDIO_MODES:
         raise ConfigError("audio_mode must be follow or fixed")
     if not isinstance(config.audio_host, str) or (config.audio_host and protocol.read_id(config.audio_host) is None):
@@ -447,6 +457,11 @@ def config_from_dict(raw: dict) -> Config:
             audio_share_mic=raw.get("audio_share_mic", False),
             audio_mode=raw.get("audio_mode", "follow"),
             audio_host=raw.get("audio_host", ""),
+            audio_opus=raw.get("audio_opus", True),
+            audio_echo_cancel=raw.get("audio_echo_cancel", True),
+            audio_apps=raw.get("audio_apps", []),
+            audio_alerts=raw.get("audio_alerts", False),
+            audio_sync_volume=raw.get("audio_sync_volume", False),
             home_shortcut=raw.get("home_shortcut", False),
             mac_hardware_address=raw.get("mac_hardware_address", "") or "",
             mac_host=raw.get("mac_host", "") or "",
@@ -537,6 +552,11 @@ def config_to_dict(config: Config) -> dict:
         "audio_share_mic": config.audio_share_mic,
         "audio_mode": config.audio_mode,
         "audio_host": config.audio_host,
+        "audio_opus": config.audio_opus,
+        "audio_echo_cancel": config.audio_echo_cancel,
+        "audio_apps": list(config.audio_apps),
+        "audio_alerts": config.audio_alerts,
+        "audio_sync_volume": config.audio_sync_volume,
         "home_shortcut": config.home_shortcut,
         "mac_hardware_address": config.mac_hardware_address,
         "mac_host": config.mac_host,

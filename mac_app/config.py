@@ -85,6 +85,11 @@ class Config:
     audio_share_mic: bool = False
     audio_mode: str = "follow"
     audio_host: str = ""
+    audio_opus: bool = True
+    audio_echo_cancel: bool = True
+    audio_apps: list = field(default_factory=list)     # per-program sound works on Linux only
+    audio_alerts: bool = False
+    audio_sync_volume: bool = False
     # Same on all machines: the Crossing and Design pages kept in step with the PC's, and the unix
     # seconds of the last change to that or to a shared value; see settings_sync.
     same_on_both: bool = False
@@ -217,6 +222,12 @@ def parse_config(raw: dict) -> Config:
         audio_share_mic=raw.get("audio_share_mic", False) is True,
         audio_mode=raw.get("audio_mode") if raw.get("audio_mode") in ("follow", "fixed") else "follow",
         audio_host=raw.get("audio_host") if isinstance(raw.get("audio_host"), str) and len(raw.get("audio_host")) <= 64 else "",
+        audio_opus=raw.get("audio_opus", True) is not False,
+        audio_echo_cancel=raw.get("audio_echo_cancel", True) is not False,
+        audio_apps=[name for name in (raw.get("audio_apps") if isinstance(raw.get("audio_apps"), list) else [])
+                    if isinstance(name, str) and name.strip() and len(name) <= 64][:32],
+        audio_alerts=raw.get("audio_alerts", False) is True,
+        audio_sync_volume=raw.get("audio_sync_volume", False) is True,
         same_on_both=raw.get("same_on_both", False) is True,
         same_set_at=_stamp(raw.get("same_set_at", 0)),
         same_groups=groups,
