@@ -13,7 +13,7 @@ import logging
 import threading
 from typing import Callable, Optional
 
-from . import audio_io, audio_stream, protocol
+from . import audio_aec, audio_codec, audio_io, audio_stream, protocol
 from .i18n import tr
 
 LOGGER = logging.getLogger(__name__)
@@ -30,8 +30,9 @@ class Streamer:
     """Reads frames from `source` and sends each as an `audio_data`. `step()` is one frame;
     the thread repeats it until stopped or the source fails (`on_fail(text)` then)."""
 
-    def __init__(self, source, direction: str, send: Callable[[dict], bool], on_fail=None) -> None:
+    def __init__(self, source, direction: str, send: Callable[[dict], bool], on_fail=None, encoder=None) -> None:
         self.source = source
+        self.encoder = encoder      # an Opus encoder, or None to send s16le
         self.direction = direction
         self._send = send
         self._on_fail = on_fail
@@ -41,8 +42,11 @@ class Streamer:
 
     def step(self) -> None:
         pcm = self.source.read()
+        format = "s16le"
+        if self.encoder is not None:
+            pcm, format = self.encoder.encode(pcm), "opus"
         # A full queue drops this frame; the sequence still moves, so the player hears a gap, not a shift.
-        self._send(protocol.audio_data_msg(self.direction, self.seq, pcm))
+        self._send(protocol.audio_data_msg(self.direction, self.seq, pcm, format))
         self.seq = (self.seq + 1) & protocol.AUDIO_MAX_SEQ
 
     def start(self) -> None:
@@ -108,6 +112,7 @@ class _HostSide:
         self.sound_wanted = False
         self.sound_play: Optional[audio_stream.Playback] = None
         self.mic_send: Optional[Streamer] = None
+        self.echo = None          # the EchoCanceller shared by the sound played and the mic sent
 
 
 class _GuestSide:
@@ -139,6 +144,14 @@ class AudioController:
         want_mic: Callable[[], bool] = lambda: False,
         config: Callable[[], tuple] = lambda: ("follow", ""),
         status: Callable[[str], None] = None,
+        want_opus: Callable[[], bool] = lambda: False,
+        want_echo_cancel: Callable[[], bool] = lambda: False,
+        codec_loader=None,
+        apps: Callable[[], list] = lambda: [],
+        want_alerts: Callable[[], bool] = lambda: False,
+        play_alert: Callable[[str], None] = None,
+        want_volume: Callable[[], bool] = lambda: False,
+        apply_volume: Callable[[float, bool], None] = None,
     ) -> None:
         self._send_fn = send
         self._caps_of = caps_of
@@ -148,6 +161,14 @@ class AudioController:
         self._want_mic = want_mic
         self._config = config
         self._status = status
+        self._want_opus = want_opus
+        self._want_echo = want_echo_cancel
+        self._codec_loader = codec_loader
+        self._apps = apps
+        self._want_alerts = want_alerts
+        self._play_alert = play_alert
+        self._want_volume = want_volume
+        self._apply_volume = apply_volume
         self._lock = threading.RLock()
         self._raw = {}            # id text -> the peer as the app holds it
         self._up = set()
@@ -175,7 +196,7 @@ class AudioController:
 
     def _devices(self):
         if self._backend is None:
-            self._backend = audio_io.SoundcardBackend()
+            self._backend = audio_io.SoundcardBackend(apps=self._apps)
         return self._backend
 
     def usable(self) -> bool:
@@ -195,12 +216,54 @@ class AudioController:
             return ("follow", None)
         return ("fixed", host or self._me)
 
-    def _playback(self, sink_kind: str, channels: int, name: str) -> audio_stream.Playback:
+    def _playback(self, sink_kind: str, channels: int, name: str, decoder=None, wrap=None) -> audio_stream.Playback:
         sink = self._devices().open_sink(sink_kind)
+        if wrap is not None:
+            sink = wrap(sink)
         buffer = audio_stream.JitterBuffer(frame_bytes(channels), audio_io.FRAME_MS)
-        playback = audio_stream.Playback(sink, buffer, name)
+        playback = audio_stream.Playback(sink, buffer, name, decoder)
         playback.start()
         return playback
+
+    # -- Opus and echo cancellation -----------------------------------------
+
+    def _codec_kwargs(self) -> dict:
+        return {} if self._codec_loader is None else {"loader": self._codec_loader}
+
+    def _opus_ok(self) -> bool:
+        """True when the setting is on and the codec can be found."""
+        try:
+            wanted = bool(self._want_opus())
+        except Exception:
+            return False
+        return wanted and (self._codec_loader is not None or audio_codec.available())
+
+    def _peer_opus(self, key: str) -> bool:
+        return "audio_opus" in (self._caps_of(self._raw[key]) or ())
+
+    def _encoder(self, channels: int):
+        """An Opus encoder, or None (noted in the log) when it cannot be had."""
+        try:
+            return audio_codec.Encoder(channels, **self._codec_kwargs())
+        except audio_io.AudioUnavailable as error:
+            LOGGER.warning("audio: Opus is not usable, sending raw sound: %s", error)
+            return None
+
+    def _decoder(self, channels: int):
+        try:
+            return audio_codec.Decoder(channels, **self._codec_kwargs())
+        except audio_io.AudioUnavailable as error:
+            LOGGER.warning("audio: Opus is not usable here: %s", error)
+            return None
+
+    def _echo_for(self, side: "_HostSide"):
+        """The canceller of this host side when it plays the other's sound and sends its mic."""
+        if side.echo is None and self._want_echo() and self._want_sound() and self._want_mic():
+            try:
+                side.echo = audio_aec.EchoCanceller()
+            except Exception as error:   # numpy missing: no cancellation, everything else carries on
+                LOGGER.warning("audio: echo cancellation is off: %s", error)
+        return side.echo
 
     @staticmethod
     def _stop_all(*parts) -> None:
@@ -308,7 +371,8 @@ class AudioController:
         want_mic = ok and bool(self._want_mic())
         if want_sound and not side.sound_wanted:
             side.sound_wanted = True
-            self._send(key, protocol.audio_want_msg("out", audio_io.RATE, SOUND_CHANNELS, "s16le", audio_io.FRAME_MS))
+            fmt = "opus" if self._opus_ok() and self._peer_opus(key) and self._decoder(SOUND_CHANNELS) else "s16le"
+            self._send(key, protocol.audio_want_msg("out", audio_io.RATE, SOUND_CHANNELS, fmt, audio_io.FRAME_MS))
         elif not want_sound and side.sound_wanted:
             self._stop_sound_play(side)
             self._send(key, protocol.audio_stop_msg("out"))
@@ -318,9 +382,14 @@ class AudioController:
             except audio_io.AudioUnavailable as error:
                 self._say(tr("microphone sharing is off: %s") % error)
             else:
-                self._send(key, protocol.audio_start_msg("mic", audio_io.RATE, MIC_CHANNELS, "s16le", audio_io.FRAME_MS))
+                echo = self._echo_for(side)
+                if echo is not None:
+                    source = audio_aec.EchoSource(source, echo)
+                encoder = self._encoder(MIC_CHANNELS) if self._opus_ok() and self._peer_opus(key) else None
+                self._send(key, protocol.audio_start_msg("mic", audio_io.RATE, MIC_CHANNELS,
+                                                         "opus" if encoder else "s16le", audio_io.FRAME_MS))
                 side.mic_send = Streamer(source, "mic", lambda message: self._send(key, message),
-                                         lambda text: self._mic_failed(key, text))
+                                         lambda text: self._mic_failed(key, text), encoder)
                 side.mic_send.start()
         elif not want_mic and side.mic_send is not None:
             self._stop_mic_send(side)
@@ -362,15 +431,23 @@ class AudioController:
             if fields["channels"] != SOUND_CHANNELS:
                 self._send(key, protocol.audio_stop_msg("out", "format"))
                 return
+            decoder = None
+            if fields.get("format", "s16le") == "opus":
+                decoder = self._decoder(SOUND_CHANNELS) if self._opus_ok() else None
+                if decoder is None:
+                    self._send(key, protocol.audio_stop_msg("out", "format"))
+                    return
+            echo = self._echo_for(side)
+            wrap = None if echo is None else (lambda sink: audio_aec.EchoSink(sink, echo, SOUND_CHANNELS))
             try:
-                side.sound_play = self._playback("speaker", SOUND_CHANNELS, "audio-sound")
+                side.sound_play = self._playback("speaker", SOUND_CHANNELS, "audio-sound", decoder, wrap)
             except audio_io.AudioUnavailable as error:
                 self._say(tr("the other computer's sound is off: %s") % error)
                 side.sound_wanted = False
                 self._send(key, protocol.audio_stop_msg("out", "unavailable"))
         elif kind == protocol.MSG_AUDIO_DATA and fields["dir"] == "out":
             if side.sound_play is not None:
-                side.sound_play.push(fields["seq"], fields["pcm"])
+                side.sound_play.push(fields["seq"], fields["pcm"], fields.get("format", "s16le"))
         elif kind == protocol.MSG_AUDIO_STOP:
             if fields["dir"] == "out":
                 self._stop_sound_play(side)
@@ -392,7 +469,7 @@ class AudioController:
             self._start_mic(key, side, fields)
         elif kind == protocol.MSG_AUDIO_DATA and direction == "mic":
             if side.mic_play is not None:
-                side.mic_play.push(fields["seq"], fields["pcm"])
+                side.mic_play.push(fields["seq"], fields["pcm"], fields.get("format", "s16le"))
         elif kind == protocol.MSG_AUDIO_STOP:
             if direction == "out":
                 sound, side.sound_send = side.sound_send, None
@@ -413,9 +490,11 @@ class AudioController:
             self._say(tr("cannot send this computer's sound: %s") % error)
             self._send(key, protocol.audio_stop_msg("out", "unavailable"))
             return
-        self._send(key, protocol.audio_start_msg("out", audio_io.RATE, SOUND_CHANNELS, "s16le", audio_io.FRAME_MS))
+        encoder = self._encoder(SOUND_CHANNELS) if fields.get("format", "s16le") == "opus" and self._opus_ok() else None
+        self._send(key, protocol.audio_start_msg("out", audio_io.RATE, SOUND_CHANNELS,
+                                                 "opus" if encoder else "s16le", audio_io.FRAME_MS))
         side.sound_send = Streamer(source, "out", lambda message: self._send(key, message),
-                                   lambda text: self._say(tr("sending this computer's sound stopped: %s") % text))
+                                   lambda text: self._say(tr("sending this computer's sound stopped: %s") % text), encoder)
         side.sound_send.start()
 
     def _start_mic(self, key: str, side: _GuestSide, fields: dict) -> None:
@@ -424,11 +503,53 @@ class AudioController:
         if fields["channels"] != MIC_CHANNELS or not self.usable():
             self._send(key, protocol.audio_stop_msg("mic", "unavailable"))
             return
+        decoder = None
+        if fields.get("format", "s16le") == "opus":
+            decoder = self._decoder(MIC_CHANNELS) if self._opus_ok() else None
+            if decoder is None:
+                self._send(key, protocol.audio_stop_msg("mic", "format"))
+                return
         try:
-            side.mic_play = self._playback("virtual_mic", MIC_CHANNELS, "audio-mic")
+            side.mic_play = self._playback("virtual_mic", MIC_CHANNELS, "audio-mic", decoder)
         except audio_io.AudioUnavailable as error:
             self._say(tr("cannot play the other computer's microphone: %s") % error)
             self._send(key, protocol.audio_stop_msg("mic", "unavailable"))
+
+    # -- alert sounds and volume (no stream, any linked peer) ---------------
+
+    def _audio_peers(self) -> list:
+        return [key for key in self._up if "audio" in (self._caps_of(self._raw[key]) or ())]
+
+    def send_alert(self, kind: str = "default") -> int:
+        """Ask every linked peer to play its own system sound `kind` (when the setting is on).
+        Returns how many were asked."""
+        if kind not in protocol.AUDIO_ALERT_KINDS or not self._want_alerts():
+            return 0
+        with self._lock:
+            return sum(1 for key in self._audio_peers() if self._send(key, protocol.audio_alert_msg(kind)))
+
+    def _alert_in(self, key: str, fields: dict) -> None:
+        if key not in self._up or not self._want_alerts() or self._play_alert is None:
+            return
+        try:
+            self._play_alert(fields["kind"])
+        except Exception:
+            LOGGER.exception("audio: could not play the alert sound")
+
+    def send_volume(self, level: float, muted: bool) -> int:
+        """Tell every linked peer this machine's output volume and mute (when the setting is on)."""
+        if not self._want_volume():
+            return 0
+        with self._lock:
+            return sum(1 for key in self._audio_peers() if self._send(key, protocol.audio_volume_msg(level, muted)))
+
+    def _volume_in(self, key: str, fields: dict) -> None:
+        if key not in self._up or not self._want_volume() or self._apply_volume is None:
+            return
+        try:
+            self._apply_volume(fields["level"], fields["muted"])
+        except Exception:
+            LOGGER.exception("audio: could not apply the other computer's volume")
 
     # -- messages -----------------------------------------------------------
 
@@ -441,6 +562,10 @@ class AudioController:
                 host = fields["host"]
                 self._remote[key] = (fields["mode"], protocol.id_text(host) if host else None)
                 self._reconcile()
+            elif kind == protocol.MSG_AUDIO_ALERT:
+                self._alert_in(key, fields)
+            elif kind == protocol.MSG_AUDIO_VOLUME:
+                self._volume_in(key, fields)
             elif key in self._hosts:
                 self._from_guest(key, self._hosts[key], kind, fields)
             elif key in self._guests:
