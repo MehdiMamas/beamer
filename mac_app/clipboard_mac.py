@@ -177,3 +177,43 @@ def set_contents(text, png):
     except Exception:
         LOGGER.exception("failed to set the macOS clipboard")
         return False
+
+
+def read_files():
+    """Paths of the files and folders copied in Finder (file URLs on the general pasteboard), or
+    [] when there are none. Raises nothing."""
+    if AppKit is None:
+        return []
+    try:
+        with _LOCK:
+            pasteboard = AppKit.NSPasteboard.generalPasteboard()
+            urls = pasteboard.readObjectsForClasses_options_(
+                [AppKit.NSURL], {AppKit.NSPasteboardURLReadingFileURLsOnlyKey: True}) or []
+            paths = []
+            for url in urls:
+                path = url.path() if url.isFileURL() else None
+                if isinstance(path, str) and path:
+                    paths.append(str(path))
+            return paths
+    except Exception:
+        LOGGER.exception("failed to read copied files from the macOS clipboard")
+        return []
+
+
+def set_files(paths):
+    """Replace the general pasteboard with file URLs for `paths`, so Finder pastes them. Returns
+    True when written, False otherwise. Never raises."""
+    global _synced_count, _written_count
+    if AppKit is None or not paths:
+        return False
+    try:
+        with _LOCK:
+            pasteboard = AppKit.NSPasteboard.generalPasteboard()
+            count = pasteboard.clearContents()
+            wrote = bool(pasteboard.writeObjects_([AppKit.NSURL.fileURLWithPath_(path) for path in paths]))
+            if wrote:
+                _synced_count = _written_count = count
+        return wrote
+    except Exception:
+        LOGGER.exception("failed to set files on the macOS clipboard")
+        return False

@@ -1905,7 +1905,7 @@ class WindowsApplication(QWidget):
             "platform": OWN_PLATFORM,
             "app": VERSION[:32] if VERSION.isascii() and VERSION.isprintable() else "dev",
             # A swipe has no shortcut every Linux desktop shares, so Linux does not offer gestures.
-            "caps": [cap for cap in ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "identify_screens", "ping_rtt", "motion_path")
+            "caps": [cap for cap in ("clipboard", "clipboard_image", "clipboard_files", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "identify_screens", "ping_rtt", "motion_path")
                      if not (cap == "gestures" and OWN_PLATFORM == "linux")],
             "port": self._settings_port,
         }

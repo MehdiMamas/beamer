@@ -313,6 +313,69 @@ class OneAtATimeTests(unittest.TestCase):
         self.assertEqual(self.board.most, 1)
 
 
+class _FakeURL:
+    def __init__(self, path, file_url=True):
+        self._path, self._file = path, file_url
+
+    def path(self):
+        return self._path
+
+    def isFileURL(self):
+        return self._file
+
+
+class _FileBoard:
+    def __init__(self, urls=()):
+        self.urls, self.written, self.cleared, self.options = list(urls), None, 0, None
+
+    def readObjectsForClasses_options_(self, classes, options):
+        self.options = options
+        return self.urls
+
+    def clearContents(self):
+        self.cleared += 1
+        return 40 + self.cleared
+
+    def writeObjects_(self, objects):
+        self.written = list(objects)
+        return True
+
+
+def _file_appkit(board):
+    return mock.Mock(
+        NSPasteboard=mock.Mock(generalPasteboard=lambda: board),
+        NSURL=mock.Mock(fileURLWithPath_=lambda path: _FakeURL(path)),
+        NSPasteboardURLReadingFileURLsOnlyKey="file-only")
+
+
+class FileListTests(unittest.TestCase):
+    def test_read_files_asks_for_file_urls_only_and_skips_other_urls(self):
+        board = _FileBoard([_FakeURL("/Users/m/a.txt"), _FakeURL("http://x", file_url=False), _FakeURL("/Users/m/dir")])
+        with mock.patch.object(clipboard_mac, "AppKit", _file_appkit(board)):
+            self.assertEqual(clipboard_mac.read_files(), ["/Users/m/a.txt", "/Users/m/dir"])
+        self.assertEqual(board.options, {"file-only": True})
+
+    def test_read_files_is_empty_without_appkit_or_files_or_on_error(self):
+        with mock.patch.object(clipboard_mac, "AppKit", None):
+            self.assertEqual(clipboard_mac.read_files(), [])
+        with mock.patch.object(clipboard_mac, "AppKit", _file_appkit(_FileBoard())):
+            self.assertEqual(clipboard_mac.read_files(), [])
+        appkit = _file_appkit(_FileBoard())
+        appkit.NSPasteboard.generalPasteboard = mock.Mock(side_effect=RuntimeError("boom"))
+        with mock.patch.object(clipboard_mac, "AppKit", appkit):
+            self.assertEqual(clipboard_mac.read_files(), [])
+
+    def test_set_files_writes_file_urls_and_remembers_the_write(self):
+        board = _FileBoard()
+        with mock.patch.object(clipboard_mac, "AppKit", _file_appkit(board)):
+            self.assertTrue(clipboard_mac.set_files(["/c/t/a.txt", "/c/t/dir"]))
+            self.assertEqual([url.path() for url in board.written], ["/c/t/a.txt", "/c/t/dir"])
+            self.assertEqual(clipboard_mac.write_stamp(), 41)
+            self.assertFalse(clipboard_mac.set_files([]))
+        with mock.patch.object(clipboard_mac, "AppKit", None):
+            self.assertFalse(clipboard_mac.set_files(["/x"]))
+
+
 OneAtATimeTests = unittest.skipIf(clipboard_mac.AppKit is None, "AppKit is only available on macOS")(OneAtATimeTests)
 
 

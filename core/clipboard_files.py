@@ -115,6 +115,12 @@ def parse_entries(entries):
     return parsed
 
 
+def entries_from_parsed(parsed):
+    """The `files` list for what `parse_entries` returned, to pass a list that arrived on."""
+    return [{"path": path, "dir": True} if data is None else {"path": path, "data": base64.b64encode(data).decode("ascii")}
+            for path, data in parsed]
+
+
 def _is_link(path) -> bool:
     try:
         info = os.lstat(path)

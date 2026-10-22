@@ -27,6 +27,7 @@ import threading
 import time
 from typing import Callable, Optional
 
+from core import clipboard_files
 from core import ignored
 from core import keytable
 from core import owner as owner_module
@@ -1052,7 +1053,7 @@ class LinkSender:
             read = protocol.read_clipboard(message)
             if read is not None:
                 # Rebuilt from what was read: the owner sends it on to the machine input is on.
-                clean = protocol.clipboard_msg(read["text"], read["image"])
+                clean = protocol.clipboard_msg(read["text"], read["image"], clipboard_files.entries_from_parsed(read["files"]) if "files" in read else None)
                 with self._lock:
                     actions = self._owner.clipboard_arrived(peer, began_at if began_at is not None else self._clock(), clean)
                     self._queue(actions)
@@ -1460,15 +1461,33 @@ class LinkSender:
             text = None
         if "clipboard_image" not in caps:
             image = None
-        if not text and image is None:
+        files = None
+        read_files = getattr(clipboard, "read_files", None)
+        if "clipboard_files" in caps and read_files is not None:
+            try:
+                files = clipboard_files.encode_paths(read_files())
+            except Exception:
+                LOGGER.exception("Failed to read the copied files for %s", self._name(peer))
+            if files is not None:
+                # Files go without the image, so the frame stays under MAX_FRAME_BYTES.
+                image = None
+        if not text and image is None and files is None:
             return None
-        return self.links.post(peer, protocol.clipboard_msg(text or None, image))
+        return self.links.post(peer, protocol.clipboard_msg(text or None, image, files))
 
     def _set_clipboard(self, message: dict) -> None:
         read = protocol.read_clipboard(message)
-        if read is None or (read["text"] is None and read["image"] is None):
+        if read is None or (read["text"] is None and read["image"] is None and "files" not in read):
             return
         clipboard = self._clipboard_module()
+        paths, set_files = None, getattr(clipboard, "set_files", None)
+        if "files" in read and set_files is not None:
+            try:
+                paths = clipboard_files.write_transfer(read["files"])
+            except OSError:
+                LOGGER.exception("Could not store the received files")
+        if paths is None and read["text"] is None and read["image"] is None:
+            return
         started_stamp = self._clipboard_stamp_now()
         for attempt in range(3):
             if attempt:
@@ -1476,7 +1495,9 @@ class LinkSender:
                 if started_stamp is None or self._clipboard_stamp_now() != started_stamp:
                     break
             try:
-                written = clipboard.set_contents(read["text"], read["image"])
+                written = bool(paths) and bool(set_files(paths))
+                if not written and (read["text"] is not None or read["image"] is not None):
+                    written = clipboard.set_contents(read["text"], read["image"])
             except Exception:
                 written = False
                 if attempt == 2:
