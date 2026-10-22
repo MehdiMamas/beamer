@@ -91,14 +91,25 @@ class Playback:
     """Feeds `sink` (anything with `write(pcm)` and `close()`) from a `JitterBuffer`. The device's
     own pacing sets the speed, so the loop is `write(pull())`; `step()` is one turn of it."""
 
-    def __init__(self, sink, buffer: JitterBuffer, name: str = "audio") -> None:
+    def __init__(self, sink, buffer: JitterBuffer, name: str = "audio", decoder=None) -> None:
         self.sink = sink
         self.buffer = buffer
         self.name = name
+        self.decoder = decoder      # turns an Opus packet into a frame; None when the stream is s16le
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
-    def push(self, seq: int, pcm: bytes) -> bool:
+    def push(self, seq: int, pcm: bytes, format: str = "s16le") -> bool:
+        """Queue one frame. An Opus packet is decoded first; one that does not decode is dropped."""
+        if format == "opus":
+            if self.decoder is None:
+                return False
+            try:
+                pcm = self.decoder.decode(pcm)
+            except ValueError:
+                return False
+        elif self.decoder is not None:
+            return False
         return self.buffer.push(seq, pcm)
 
     def step(self) -> None:
