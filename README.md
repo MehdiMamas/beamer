@@ -114,8 +114,7 @@ In your own appearance: light if your GitHub is light, dark if it is dark.
 - **Pair them clearly.** Pair a machine is at the top of Overview, and the six digits are centred.
 - **Three machines.** Pair each machine with the others in the group. A chain needs a direct
   pairing between every pair of machines in it.
-- **The clipboard comes with you.** Text and images, both ways, at the moment you switch. Files
-  stay where they are.
+- **The clipboard comes with you.** Text, images and copied files and folders (up to 8MB in all), both ways, at the moment you switch.
 - **Your shortcuts still work.** Between a Mac and Windows, Cmd becomes Ctrl and Option becomes
   Alt, so Cmd+C copies there too. The PC gets the reverse. Between two Macs or two PCs, each key
   arrives as the same physical key. On Windows, you can also choose a Mac keyboard layout, where

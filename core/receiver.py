@@ -498,6 +498,8 @@ class LinkResponder:
       The injector also needs `inject_text(chars)` for the `text` capability. The clipboard needs
       `get_contents()`, `set_contents(text, image)` and `change_stamp()`, a value that changes
       whenever the clipboard does; without it, a machine let go never sends its clipboard.
+      Optionally `read_files()` (local paths of the copied files) and `set_files(paths)`, for the
+      `clipboard_files` capability.
       `unlock` is Windows' lock-screen module, or None.
     - `hardware(host)`: this machine's address on the interface that reaches `host`, asked for each
       link's own address so the `welcome` gives every peer the address its wake-on-LAN must go to;

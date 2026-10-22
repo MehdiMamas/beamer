@@ -479,6 +479,7 @@ Capabilities say what a machine does with a message it receives:
 |---|---|
 | `clipboard` | it takes clipboard text |
 | `clipboard_image` | it takes clipboard images |
+| `clipboard_files` | it takes copied files and folders in `clipboard` |
 | `gestures` | it acts on `gesture` |
 | `media_keys` | it acts on the media key names (section 7) |
 | `text` | it types `text` |
@@ -543,7 +544,7 @@ Either way:
 
 | `type` | `data` |
 |---|---|
-| `clipboard` | optional `text`; optional `image` (standard base64 with padding, of a PNG) with `image_format: "png"` |
+| `clipboard` | optional `text`; optional `image` (standard base64 with padding, of a PNG) with `image_format: "png"`; optional `files`, a list of entries: `{"path", "data"}` for a file (`path` relative, `/` separated, `data` standard base64 with padding) or `{"path": "dir/", "dir": true}` for an empty folder. A copied folder sends its whole tree, with paths relative to the copied item's parent |
 | `arrangement` | `edge`, `set_at`, `by` (section 8) |
 | `settings` | section 10 |
 | `paired` | `ids`: list of `b64`, at most 32 |
@@ -589,6 +590,12 @@ Either way:
   A few megabytes of PNG can otherwise claim gigabytes once decoded. A sender never sends an
   image outside these limits, and a receiver drops one, without decoding it. Over any limit,
   that part is dropped and the rest of the message stands.
+- **Clipboard file limits**: `files` carries at most 8 MiB of file bytes before base64 in all, 1024
+  entries, 1024 UTF-8 bytes per path, 32 components and 255 bytes per component. A path must be
+  relative and `/` separated, with no empty, `.` or `..` component, no backslash, drive letter
+  or control character, no Windows-reserved name, and no two entries on the same path. A sender
+  omits `files` that are over any limit and a receiver drops them, so the text stands. `files`
+  go only to a peer whose `caps` hold `clipboard_files`.
 - **Liveness.** An initiator sends `ping` when it has sent nothing for a second; a responder's
   `ack` heartbeat does the same the other way (section 9). A side that receives no byte at all for
   2.5 seconds (a responder) or 2 seconds (an initiator) ends the link. Any byte counts, so a large
@@ -885,6 +892,10 @@ names a machine sends input there, from home or straight from the machine it is 
 
 ### The clipboard follows the input
 
+- Copied files and folders ride the same way, in `files`. The receiver writes them into a fresh
+  folder of its own (the last 5 are kept) and puts the top-level items on its clipboard as a file
+  list. Files go without the image: a message with `files` carries no `image`, and a receiver that
+  gets both keeps the files. A file list Beamer set from a received message is not sent back.
 - When an owner takes a machine, it sends its own clipboard after the taking `focus` (in a
   chain, after the `accept`) and before any input, unless that machine is known to hold it
   already: the clipboard went there or came from there, and has not changed here or come from
