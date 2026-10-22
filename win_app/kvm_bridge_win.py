@@ -707,7 +707,6 @@ class WindowsApplication(QWidget):
         self.volume_sync = audio_system.VolumePoller(
             audio_system.VolumeControl(), self.audio.send_volume,
             enabled=lambda: bool(self._config and self._config.audio_sync_volume))
-        self.volume_sync.start()
         self.sender.audio_callback = self.audio.receive
         self.sender.moved_callback = self.audio.input_moved
         self.sender.paired_callback = self._store_paired
@@ -1343,11 +1342,9 @@ class WindowsApplication(QWidget):
         self.audio_apps_edit.setPlaceholderText(tr("firefox, spotify"))
         self.audio_apps_edit.setText(", ".join(self._config.audio_apps) if self._config else "")
         self.audio_apps_edit.editingFinished.connect(self._audio_apps_edited)
-        module.body.addWidget(self._row(widgets.label(tr("Only share the sound of these programs"), "key"), self.audio_apps_edit))
+        module.body.addWidget(self._row(widgets.label(tr("Only these programs"), "key"), self.audio_apps_edit))
         module.body.addWidget(widgets.label(
-            tr("Sharing only some programs' sound works on Linux (PulseAudio or PipeWire). On Windows and macOS this "
-               "computer's whole sound is shared. Alert sounds play the other computer's own sound when Beamer itself "
-               "beeps; they are not a copy of its desktop notifications. Opus needs the optional opuslib package."),
+            tr("Picking programs works on Linux only; elsewhere all sound is shared. Opus needs the optional opuslib package."),
             "note", wrap=True))
         audio_note = widgets.label(
             tr("Follow the input: while another computer has this one's keyboard and mouse, its sound plays on this PC "
@@ -3248,7 +3245,13 @@ class WindowsApplication(QWidget):
             return
         setattr(self._config, name, bool(enabled))
         self._persist()
+        self._start_volume_sync()
         self.audio.refresh()
+
+    def _start_volume_sync(self) -> None:
+        # The poller thread runs only once volume sync has been switched on (off by default).
+        if self._config is not None and self._config.audio_sync_volume:
+            self.volume_sync.start()
 
     def _set_hide_idle_pointer(self, enabled: bool) -> None:
         if self._config is None:
@@ -5173,6 +5176,7 @@ class WindowsApplication(QWidget):
             self.audio_echo_switch.setChecked(config.audio_echo_cancel)
             self.audio_alerts_switch.setChecked(config.audio_alerts)
             self.audio_volume_switch.setChecked(config.audio_sync_volume)
+            self._start_volume_sync()
             self.audio_apps_edit.setText(", ".join(config.audio_apps))
             self._refresh_audio_host()
             self.dragging_switch.setChecked(config.block_while_dragging)

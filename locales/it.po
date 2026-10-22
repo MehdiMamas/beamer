@@ -4665,8 +4665,8 @@ msgid "Delay:"
 msgstr "Ritardo:"
 
 #: win_app/kvm_bridge_win.py
-msgid "Sharing only some programs' sound works on Linux (PulseAudio or PipeWire). On Windows and macOS this computer's whole sound is shared. Alert sounds play the other computer's own sound when Beamer itself beeps; they are not a copy of its desktop notifications. Opus needs the optional opuslib package."
-msgstr "Condividere solo l'audio di alcuni programmi funziona su Linux (PulseAudio o PipeWire). Su Windows e macOS viene condiviso tutto l'audio di questo computer. I suoni di avviso riproducono il suono proprio dell'altro computer quando è Beamer stesso a emettere un segnale; non sono una copia delle sue notifiche del desktop. Opus richiede il pacchetto opzionale opuslib."
+msgid "Picking programs works on Linux only; elsewhere all sound is shared. Opus needs the optional opuslib package."
+msgstr "La scelta dei programmi funziona solo su Linux; altrove si condivide tutto l'audio. Opus richiede il pacchetto opzionale opuslib."
 
 #: win_app/kvm_bridge_win.py
 msgid "Start at sign-in needs the same administrator account that runs Beamer."
@@ -4772,7 +4772,7 @@ msgid "Audio host"
 msgstr "Host audio"
 
 #: win_app/kvm_bridge_win.py
-msgid "Only share the sound of these programs"
+msgid "Only these programs"
 msgstr "Condividi solo l'audio di questi programmi"
 
 #: win_app/kvm_bridge_win.py
