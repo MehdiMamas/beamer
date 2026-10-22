@@ -1710,6 +1710,18 @@ msgstr "L'impostazione di questo schermo vale per ogni puntatore che vi si trova
 msgid "Hide the pointer on the machine not in use"
 msgstr "Nascondi il puntatore sul computer non in uso"
 
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Play the other computer's sound here"
+msgstr "Riproduci qui l'audio dell'altro computer"
+
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Use this mic on the other computer"
+msgstr "Usa questo microfono sull'altro computer"
+
+#: mac_app/kvm_bridge_app.py
+msgid "Make this Mac the audio host"
+msgstr "Usa questo Mac come host audio"
+
 # New in 1.5.5: awaiting Lorenzo's check
 #: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
 msgid "Same ways on every machine"
@@ -2302,6 +2314,10 @@ msgstr "Collegamento"
 #: mac_app/kvm_bridge_app.py
 msgid "This Mac's pointer always hides while it drives another machine. On, it also hides after another machine stops driving it, until its own mouse or trackpad moves."
 msgstr "Il puntatore di questo Mac si nasconde sempre mentre controlla un altro computer. Se attivo, si nasconde anche dopo che un altro computer smette di controllarlo, finché il suo mouse o trackpad non si muove."
+
+#: mac_app/kvm_bridge_app.py
+msgid "Sound follows the input: while another computer has it, its sound plays here and this mic plays there. As the audio host, this Mac plays every computer's sound and shares its mic with all of them, wherever the input is. Needs the soundcard package; capturing this Mac's sound or playing the mic into a program needs BlackHole."
+msgstr "L'audio segue l'input: mentre un altro computer ha l'input, il suo audio viene riprodotto qui e questo microfono viene riprodotto là. Come host audio, questo Mac riproduce l'audio di ogni computer e condivide il microfono con tutti, ovunque sia l'input. Serve il pacchetto soundcard; per catturare l'audio di questo Mac o riprodurre il microfono in un programma serve BlackHole."
 
 #: mac_app/kvm_bridge_app.py
 msgid "Each chip is a side of this screen; click one to add or remove it. The side a machine touches crosses on its lit thirds; any other free side wraps round to it, arriving on its far side. A corner is a diagonal push, shown as a square on the map. The notch is this Mac only."
@@ -4395,6 +4411,10 @@ msgid "This PC's pointer hides while it drives another machine, and after anothe
 msgstr "Il puntatore di questo PC si nasconde mentre controlla un altro computer, e dopo che un altro computer smette di controllarlo, finché il suo mouse non si muove."
 
 #: win_app/kvm_bridge_win.py
+msgid "Follow the input: while another computer has this one's keyboard and mouse, its sound plays on this PC and this PC's microphone plays there. A fixed host: every computer's sound plays on the host and the host's microphone plays on every other computer, wherever the input is. Needs the optional soundcard package; the microphone also needs a virtual audio cable on the computer it plays on."
+msgstr "Segui l'input: mentre un altro computer usa tastiera e mouse di questo, il suo audio viene riprodotto su questo PC e il microfono di questo PC viene riprodotto là. Host fisso: l'audio di ogni computer viene riprodotto sull'host e il microfono dell'host su tutti gli altri computer, ovunque sia l'input. Serve il pacchetto opzionale soundcard; il microfono richiede anche un cavo audio virtuale sul computer in cui viene riprodotto."
+
+#: win_app/kvm_bridge_win.py
 msgid "On Wayland Beamer cannot see a full-screen app, or a mouse button held before the pointer reaches an edge, so the edges are never held for one and a drag can cross."
 msgstr "Su Wayland Beamer non vede un'app a schermo intero, né un pulsante del mouse tenuto premuto prima che il puntatore raggiunga un bordo, quindi i bordi non vengono mai bloccati per un'app e un trascinamento può passare."
 
@@ -4611,6 +4631,14 @@ msgid "This PC keeps its own ways"
 msgstr "Questo PC mantiene le proprie vie"
 
 #: win_app/kvm_bridge_win.py
+msgid "Follow the input"
+msgstr "Segui l'input"
+
+#: win_app/kvm_bridge_win.py
+msgid "This computer"
+msgstr "Questo computer"
+
+#: win_app/kvm_bridge_win.py
 msgid "Follows this PC's mouse or trackpad on every screen; each screen supplies its own zones."
 msgstr "Segue il mouse o il trackpad di questo PC su ogni schermo; ogni schermo fornisce le proprie zone."
 
@@ -4682,6 +4710,10 @@ msgstr "Questo desktop non ha un'area di notifica, quindi la finestra di Beamer 
 #: win_app/kvm_bridge_win.py
 msgid "Update through your software store."
 msgstr "Aggiorna tramite il tuo gestore software."
+
+#: win_app/kvm_bridge_win.py
+msgid "Audio host"
+msgstr "Host audio"
 
 #: win_app/kvm_bridge_win.py
 msgid "Starts elevated at sign-in without a UAC prompt, so Beamer can send input to administrator apps."

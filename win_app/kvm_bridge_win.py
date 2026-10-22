@@ -76,6 +76,7 @@ from effect_overlay import EffectOverlay, desktop_box, logical_point
 from effect_overlay_x11 import EffectOverlayX11Proxy, available as xwayland_available
 from identify_overlay import IdentifyScreens
 from effect_previews import EffectStill, SwitchStill, TileHover
+from core import audio, audio_io
 from core import idle_pointer
 from core import ignored
 import motion
@@ -631,7 +632,8 @@ class WindowsApplication(QWidget):
             arrival_callback=lambda edge, x, y: self.bridge.arrived.emit(
                 arrival_method(edge, self._driver_platform()), edge or "", float(x), float(y)
             ),
-            owner_callback=lambda peer: self.bridge.owner.emit(protocol.id_text(peer) if peer else ""),
+            owner_callback=self._owner_changed,
+            audio_callback=lambda peer, kind, fields: self.audio.receive(peer, kind, fields),
             arrangement_callback=lambda peer, read: self.bridge.arrangement.emit(
                 protocol.id_text(peer), read["edge"], read["set_at"], protocol.id_text(read["by"]), read.get("way_back"),
                 protocol.id_text(read["way_back_by"]) if read.get("way_back_by") else None
@@ -639,7 +641,7 @@ class WindowsApplication(QWidget):
             settings_callback=lambda peer, data: self.bridge.settings.emit(protocol.id_text(peer), data),
             identify_callback=self._receive_identify_screens,
             paired_callback=self._store_paired,
-            link_callback=lambda peer, up: self.bridge.peers_changed.emit(),
+            link_callback=self._link_changed,
             announce=self._announce,
             away=lambda: self.sender.owner,
             zones=self._zones,
@@ -686,7 +688,17 @@ class WindowsApplication(QWidget):
             protocol.id_text(peer), read["edge"], read["set_at"], protocol.id_text(read["by"]), read.get("way_back"),
             protocol.id_text(read["way_back_by"]) if read.get("way_back_by") else None
         )
-        self.sender.link_callback = lambda peer, up: self.bridge.peers_changed.emit()
+        self.sender.link_callback = self._link_changed
+        self.audio = audio.AudioController(
+            lambda peer, message: bool(self.sender.send_to(peer, message) or self.server.send(peer, message)),
+            lambda peer: self.sender.links.caps(peer) | (self.server.caps_of(peer) or frozenset()),
+            lambda: self._config.machine_id if self._config else "",
+            want_sound=lambda: bool(self._config and self._config.audio_play_remote),
+            want_mic=lambda: bool(self._config and self._config.audio_share_mic),
+            config=lambda: (self._config.audio_mode, self._config.audio_host) if self._config else ("follow", ""),
+        )
+        self.sender.audio_callback = self.audio.receive
+        self.sender.moved_callback = self.audio.input_moved
         self.sender.paired_callback = self._store_paired
         self.sender.hw_learned = self._learn_peer_hardware
         self.sender.announce = self._announce
@@ -1291,6 +1303,26 @@ class WindowsApplication(QWidget):
             tr("This PC's pointer hides while it drives another machine, and after another machine stops driving it, "
             "until its own mouse moves."), "note", wrap=True)
         module.body.addWidget(pointer_note)
+        self.audio_play_switch = widgets.Switch(tr("Play the other computer's sound here"))
+        self.audio_play_switch.setFont(theme.font(theme.TYPE["body"]))
+        self.audio_play_switch.setChecked(self._config.audio_play_remote if self._config else False)
+        self.audio_play_switch.toggled.connect(lambda on: self._set_audio("audio_play_remote", on))
+        module.body.addWidget(self.audio_play_switch)
+        self.audio_mic_switch = widgets.Switch(tr("Use this mic on the other computer"))
+        self.audio_mic_switch.setFont(theme.font(theme.TYPE["body"]))
+        self.audio_mic_switch.setChecked(self._config.audio_share_mic if self._config else False)
+        self.audio_mic_switch.toggled.connect(lambda on: self._set_audio("audio_share_mic", on))
+        module.body.addWidget(self.audio_mic_switch)
+        self.audio_host_choice = QComboBox()
+        self.audio_host_choice.setMaximumWidth(320)
+        self.audio_host_choice.currentIndexChanged.connect(self._audio_host_chosen)
+        module.body.addWidget(self._row(widgets.label(tr("Audio host"), "key"), self.audio_host_choice))
+        audio_note = widgets.label(
+            tr("Follow the input: while another computer has this one's keyboard and mouse, its sound plays on this PC "
+            "and this PC's microphone plays there. A fixed host: every computer's sound plays on the host and the "
+            "host's microphone plays on every other computer, wherever the input is. Needs the optional soundcard "
+            "package; the microphone also needs a virtual audio cable on the computer it plays on."), "note", wrap=True)
+        module.body.addWidget(audio_note)
         self.wayland_crossing_note = widgets.label(
             tr("On Wayland Beamer cannot see a full-screen app, or a mouse button held before the pointer reaches an "
             "edge, so the edges are never held for one and a drag can cross."), "note", wrap=True)
@@ -1905,8 +1937,8 @@ class WindowsApplication(QWidget):
             "platform": OWN_PLATFORM,
             "app": VERSION[:32] if VERSION.isascii() and VERSION.isprintable() else "dev",
             # A swipe has no shortcut every Linux desktop shares, so Linux does not offer gestures.
-            "caps": [cap for cap in ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "identify_screens", "ping_rtt", "motion_path")
-                     if not (cap == "gestures" and OWN_PLATFORM == "linux")],
+            "caps": [cap for cap in ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "identify_screens", "ping_rtt", "motion_path", "audio")
+                     if not (cap == "gestures" and OWN_PLATFORM == "linux") and not (cap == "audio" and not audio_io.available())],
             "port": self._settings_port,
         }
 
@@ -3129,6 +3161,50 @@ class WindowsApplication(QWidget):
         self._config.hold_full_screen = bool(enabled)
         self._persist()
         self.sender.update_config(self._config)
+
+    def _owner_changed(self, peer) -> None:
+        self.audio.owner_changed(peer or None)
+        self.bridge.owner.emit(protocol.id_text(peer) if peer else "")
+
+    def _link_changed(self, peer, up) -> None:
+        if up:
+            self.audio.link_up(peer)
+        else:
+            self.audio.link_down(peer)
+        self.bridge.peers_changed.emit()
+
+    def _refresh_audio_host(self) -> None:
+        if not hasattr(self, "audio_host_choice") or self._config is None:
+            return
+        choice = self.audio_host_choice
+        desktops = [entry for entry in peerlist.desktops(self._peer_entries) if protocol.read_id(entry.get("id")) is not None]
+        rows = [(tr("Follow the input"), "follow", ""), (tr("This computer"), "fixed", "")]
+        for entry in desktops:
+            name = self._shown(peerlist.label_for(desktops, peer_id=entry.get("id") or "") or entry.get("platform") or "Paired machine")
+            rows.append((name, "fixed", entry["id"]))
+        current = (self._config.audio_mode, self._config.audio_host if self._config.audio_mode == "fixed" else "")
+        choice.blockSignals(True)
+        choice.clear()
+        for label, mode, host in rows:
+            choice.addItem(label, (mode, host))
+        found = choice.findData(current)
+        choice.setCurrentIndex(max(0, found))
+        choice.blockSignals(False)
+
+    def _audio_host_chosen(self, _index: int) -> None:
+        if self._config is None:
+            return
+        mode, host = self.audio_host_choice.currentData() or ("follow", "")
+        self._config.audio_mode, self._config.audio_host = mode, host
+        self._persist()
+        self.audio.refresh()
+
+    def _set_audio(self, name: str, enabled: bool) -> None:
+        if self._config is None:
+            return
+        setattr(self._config, name, bool(enabled))
+        self._persist()
+        self.audio.refresh()
 
     def _set_hide_idle_pointer(self, enabled: bool) -> None:
         if self._config is None:
@@ -5039,12 +5115,16 @@ class WindowsApplication(QWidget):
         set_divisor(effects.frame_divisor(config.frame_rate))
         for box in ( self.dragging_switch, self.hold_switch, self.glow_toggle,
                     self.landing_toggle, self.tray_switch, self.pointer_switch,
+                    self.audio_play_switch, self.audio_mic_switch,
                     self.resistance_slider, self.double_tap_slider):
             box.blockSignals(True)
         try:
             self.tray_switch.setChecked(config.show_in_tray)
             self.tray.setVisible(self.tray_shown())
             self.pointer_switch.setChecked(config.hide_idle_pointer)
+            self.audio_play_switch.setChecked(config.audio_play_remote)
+            self.audio_mic_switch.setChecked(config.audio_share_mic)
+            self._refresh_audio_host()
             self.dragging_switch.setChecked(config.block_while_dragging)
             self.hold_switch.setChecked(config.hold_full_screen)
             self.glow_toggle.setChecked(config.edge_glow)
@@ -5055,6 +5135,7 @@ class WindowsApplication(QWidget):
         finally:
             for box in ( self.dragging_switch, self.hold_switch, self.glow_toggle,
                         self.landing_toggle, self.tray_switch, self.pointer_switch,
+                        self.audio_play_switch, self.audio_mic_switch,
                         self.resistance_slider, self.double_tap_slider):
                 box.blockSignals(False)
         self._crossing_text(self.resistance_readout, f"{config.crossing_resistance_px} px")
@@ -5283,6 +5364,7 @@ class WindowsApplication(QWidget):
         if self._config is None or self._closing:
             return
         self._pull_peer_fields()
+        self._refresh_audio_host()
         linked = {protocol.id_text(peer) for peer in self._peer_caps()}
         self._profile_last_heard = {peer: heard for peer, heard in self._profile_last_heard.items() if peer in linked}
         for peer in linked:
@@ -5443,6 +5525,7 @@ class WindowsApplication(QWidget):
             return
         self._closing = True
         self.identify_screens.stop()
+        self.audio.close()
         self.refresh_timer.stop()
         self.update_checker.stop()
         if self.pairing is not None:

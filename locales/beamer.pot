@@ -1702,6 +1702,18 @@ msgid "Hide the pointer on the machine not in use"
 msgstr ""
 
 #: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Play the other computer's sound here"
+msgstr ""
+
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
+msgid "Use this mic on the other computer"
+msgstr ""
+
+#: mac_app/kvm_bridge_app.py
+msgid "Make this Mac the audio host"
+msgstr ""
+
+#: mac_app/kvm_bridge_app.py win_app/kvm_bridge_win.py
 msgid "Same ways on every machine"
 msgstr ""
 
@@ -2258,6 +2270,10 @@ msgstr ""
 
 #: mac_app/kvm_bridge_app.py
 msgid "This Mac's pointer always hides while it drives another machine. On, it also hides after another machine stops driving it, until its own mouse or trackpad moves."
+msgstr ""
+
+#: mac_app/kvm_bridge_app.py
+msgid "Sound follows the input: while another computer has it, its sound plays here and this mic plays there. As the audio host, this Mac plays every computer's sound and shares its mic with all of them, wherever the input is. Needs the soundcard package; capturing this Mac's sound or playing the mic into a program needs BlackHole."
 msgstr ""
 
 #: mac_app/kvm_bridge_app.py
@@ -4333,6 +4349,10 @@ msgid "This PC's pointer hides while it drives another machine, and after anothe
 msgstr ""
 
 #: win_app/kvm_bridge_win.py
+msgid "Follow the input: while another computer has this one's keyboard and mouse, its sound plays on this PC and this PC's microphone plays there. A fixed host: every computer's sound plays on the host and the host's microphone plays on every other computer, wherever the input is. Needs the optional soundcard package; the microphone also needs a virtual audio cable on the computer it plays on."
+msgstr ""
+
+#: win_app/kvm_bridge_win.py
 msgid "On Wayland Beamer cannot see a full-screen app, or a mouse button held before the pointer reaches an edge, so the edges are never held for one and a drag can cross."
 msgstr ""
 
@@ -4543,6 +4563,14 @@ msgid "This PC keeps its own ways"
 msgstr ""
 
 #: win_app/kvm_bridge_win.py
+msgid "Follow the input"
+msgstr ""
+
+#: win_app/kvm_bridge_win.py
+msgid "This computer"
+msgstr ""
+
+#: win_app/kvm_bridge_win.py
 msgid "Follows this PC's mouse or trackpad on every screen; each screen supplies its own zones."
 msgstr ""
 
@@ -4613,6 +4641,10 @@ msgstr ""
 
 #: win_app/kvm_bridge_win.py
 msgid "Update through your software store."
+msgstr ""
+
+#: win_app/kvm_bridge_win.py
+msgid "Audio host"
 msgstr ""
 
 #: win_app/kvm_bridge_win.py

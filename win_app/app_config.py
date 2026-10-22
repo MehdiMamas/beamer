@@ -171,6 +171,12 @@ class Config:
     # Only the machine in use shows a pointer: this PC's while it drives another, and after a driver
     # lets go of it until it moves (core/idle_pointer). This machine's own choice, never shared.
     hide_idle_pointer: bool = True
+    # Audio follows the input (WIRE.md section 3). Both off until chosen; each is this machine's own choice.
+    audio_play_remote: bool = False
+    audio_share_mic: bool = False
+    # Audio host: "follow" the input, or "fixed" on one machine ("" = this PC, else a peer id).
+    audio_mode: str = "follow"
+    audio_host: str = ""
     # Linux on Wayland: a key combination bound through the desktop's GlobalShortcuts portal sends
     # input out while it is at home, where the double-tap cannot be seen. Off until chosen, since
     # turning it on asks the desktop's permission. This machine's own choice, never shared.
@@ -278,6 +284,13 @@ def validate_config(config: Config) -> None:
         raise ConfigError("show_in_tray must be true or false")
     if not isinstance(config.hide_idle_pointer, bool):
         raise ConfigError("hide_idle_pointer must be true or false")
+    for name in ("audio_play_remote", "audio_share_mic"):
+        if not isinstance(getattr(config, name), bool):
+            raise ConfigError(name + " must be true or false")
+    if config.audio_mode not in protocol.AUDIO_MODES:
+        raise ConfigError("audio_mode must be follow or fixed")
+    if not isinstance(config.audio_host, str) or (config.audio_host and protocol.read_id(config.audio_host) is None):
+        raise ConfigError("audio_host must be empty or a machine id")
     if not isinstance(config.home_shortcut, bool):
         raise ConfigError("home_shortcut must be true or false")
     if not isinstance(config.mac_hardware_address, str):
@@ -430,6 +443,10 @@ def config_from_dict(raw: dict) -> Config:
             hold_full_screen=raw.get("hold_full_screen", False),
             show_in_tray=raw.get("show_in_tray", True),
             hide_idle_pointer=raw.get("hide_idle_pointer", True),
+            audio_play_remote=raw.get("audio_play_remote", False),
+            audio_share_mic=raw.get("audio_share_mic", False),
+            audio_mode=raw.get("audio_mode", "follow"),
+            audio_host=raw.get("audio_host", ""),
             home_shortcut=raw.get("home_shortcut", False),
             mac_hardware_address=raw.get("mac_hardware_address", "") or "",
             mac_host=raw.get("mac_host", "") or "",
@@ -516,6 +533,10 @@ def config_to_dict(config: Config) -> dict:
         "hold_full_screen": config.hold_full_screen,
         "show_in_tray": config.show_in_tray,
         "hide_idle_pointer": config.hide_idle_pointer,
+        "audio_play_remote": config.audio_play_remote,
+        "audio_share_mic": config.audio_share_mic,
+        "audio_mode": config.audio_mode,
+        "audio_host": config.audio_host,
         "home_shortcut": config.home_shortcut,
         "mac_hardware_address": config.mac_hardware_address,
         "mac_host": config.mac_host,

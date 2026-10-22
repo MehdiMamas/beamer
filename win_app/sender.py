@@ -247,6 +247,9 @@ class LinkSender:
         self.arrangement_callback: Optional[Callable] = None
         self.settings_callback: Optional[Callable] = None
         self.identify_callback: Optional[Callable] = None
+        # Audio from the PC being driven: (peer, kind, fields), already checked; and where the input is now.
+        self.audio_callback: Optional[Callable] = None
+        self.moved_callback: Optional[Callable] = None
         self.paired_callback: Optional[Callable] = None
         self.link_callback: Optional[Callable[[bytes, bool], None]] = None
 
@@ -1068,6 +1071,11 @@ class LinkSender:
             labels = protocol.read_identify_screens(message)
             if labels is not None and self.identify_callback is not None and "identify_screens" in self.links.caps(peer):
                 self._call(self.identify_callback, peer, labels)
+        elif kind in protocol.AUDIO_MESSAGES:
+            if self.audio_callback is not None and "audio" in self.links.caps(peer):
+                read = protocol.read_audio(message)
+                if read is not None:
+                    self._call(self.audio_callback, peer, *read)
         elif kind == protocol.MSG_PAIRED:
             read = protocol.read_paired(message)
             if read is not None and self.paired_callback is not None:
@@ -1493,6 +1501,10 @@ class LinkSender:
 
     # -- what the owner reports ---------------------------------------------
 
+    def _notify_moved(self, peer) -> None:
+        if self.moved_callback is not None:
+            self._call(self.moved_callback, peer)
+
     def _moved(self, moved: owner_module.Moved) -> None:
         if self._pending_windows_key is not None:
             # A buffered modifier belongs to the old owner; its press never reached either app.
@@ -1504,6 +1516,7 @@ class LinkSender:
                 self._pin_point = self._desktop_module().cursor_position()
             LOGGER.info("input is on %s%s", self._name(moved.to), _at_edge(moved.edge))
             self._report_redirecting(True)
+            self._notify_moved(moved.to)
             return
         self._pin_point = None
         self._ignore_gate.reset()
@@ -1517,6 +1530,7 @@ class LinkSender:
                     model.start_grace()
         LOGGER.info("input returned to this PC (%s)%s", moved.why, _at_edge(moved.edge))
         self._report_redirecting(False)
+        self._notify_moved(None)
         if moved.edge in return_edge.EDGES and isinstance(moved.offset, (int, float)):
             self._land(moved.edge, moved.offset, moved.display, moved.side)
         elif moved.why in ("asked", "switch"):
