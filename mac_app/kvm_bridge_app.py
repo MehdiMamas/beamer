@@ -1557,6 +1557,9 @@ class ControlWindow(AppKit.NSObject):
         self._apply_appearance(raw["appearance"])
         self.updates_switch.value = raw["check_updates"]
         self.pointer_box.value = raw["hide_idle_pointer"]
+        self.audio_play_box.value = bool(raw.get("audio_play_remote"))
+        self.audio_mic_box.value = bool(raw.get("audio_share_mic"))
+        self.audio_host_box.value = raw.get("audio_mode") == "fixed" and raw.get("audio_host") == raw.get("machine_id")
         self.modifier_select.value = raw["key_map"] if isinstance(raw["key_map"], str) else "custom"
         crossing_raw = raw["crossing"]
         self._load_ways(crossing_raw)
@@ -3308,7 +3311,35 @@ class ControlWindow(AppKit.NSObject):
             "This Mac's pointer always hides while it drives another machine. On, it also hides after another "
             "machine stops driving it, until its own mouse or trackpad moves."
         )).view)
+        self.audio_play_box = widgets.Switch(tr("Play the other computer's sound here"), on_change=lambda on: self._set_audio(audio_play_remote=bool(on)))
+        self.audio_play_box.value = self.controller.cfg.audio_play_remote
+        module.add(self.audio_play_box.view)
+        self.audio_mic_box = widgets.Switch(tr("Use this mic on the other computer"), on_change=lambda on: self._set_audio(audio_share_mic=bool(on)))
+        self.audio_mic_box.value = self.controller.cfg.audio_share_mic
+        module.add(self.audio_mic_box.view)
+        self.audio_host_box = widgets.Switch(tr("Make this Mac the audio host"), on_change=self._set_audio_host)
+        self.audio_host_box.value = self.controller.cfg.audio_mode == "fixed"
+        module.add(self.audio_host_box.view)
+        module.add(widgets.note(tr(
+            "Sound follows the input: while another computer has it, its sound plays here and this mic plays there. "
+            "As the audio host, this Mac plays every computer's sound and shares its mic with all of them, wherever the input is. "
+            "Needs the soundcard package; capturing this Mac's sound or playing the mic into a program needs BlackHole."
+        )).view)
         return module
+
+    @objc.python_method
+    def _set_audio(self, **changes):
+        try:
+            cfg = self.settings_store.save(config_to_raw(replace(self.controller.cfg, **changes)))
+        except SettingsError as exc:
+            self.logger.warning("audio setting not saved: %s", exc)
+            return
+        self.controller.update_config(cfg)
+
+    @objc.python_method
+    def _set_audio_host(self, on):
+        mine = self.settings_store.current().get("machine_id", "")
+        self._set_audio(audio_mode="fixed" if on else "follow", audio_host=mine if on else "")
 
     @objc.python_method
     def _set_hide_idle_pointer(self, on):

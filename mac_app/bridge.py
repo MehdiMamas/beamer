@@ -41,6 +41,7 @@ from core import peerlist
 from core import protocol
 from core import special_keys
 from core import receiver
+from core import audio, audio_io
 from core import settings_sync
 from core import ways
 from core.i18n import N_, tr
@@ -81,6 +82,8 @@ ROUND_TRIP_MAX_AGE_SECONDS = 5.0
 LET_GO_WAIT_SECONDS = 1.3
 OWN_PLATFORM = "macos"
 CAPABILITIES = ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "ping_rtt", "identify_screens", "motion_path")
+if audio_io.available():
+    CAPABILITIES += ("audio",)
 MEDIA_KEY_NAMES = frozenset({"volume_mute", "volume_down", "volume_up", "media_next", "media_prev", "media_stop", "media_play_pause", "brightness_up", "brightness_down"})
 
 # Why input came home, in words, for the alert. A why that is not here comes home quietly.
@@ -611,6 +614,14 @@ class KVMController:
         # The responder, once WindowsInput has made it: `driven` is how a take it is deciding is
         # seen from here (WIRE.md section 4, "a machine never drives and is driven at once").
         self.responder = None
+        # Sound follows the input, or sits on a fixed host (WIRE.md section 3, "Audio"). Idle unless
+        # the audio library is present, a switch is on and the other machine has the capability.
+        self.audio = audio.AudioController(
+            send=self._audio_send, caps_of=self._audio_caps,
+            me=lambda: protocol.id_text(self.identity()["id"]),
+            want_sound=lambda: bool(getattr(self.cfg, "audio_play_remote", False)),
+            want_mic=lambda: bool(getattr(self.cfg, "audio_share_mic", False)),
+            config=lambda: (getattr(self.cfg, "audio_mode", "follow"), getattr(self.cfg, "audio_host", "")))
         self.stop_event = threading.Event()
         self.outbound = queue.Queue(maxsize=OUTBOUND_QUEUE_SIZE)
         self.on_user_alert = None
@@ -1245,6 +1256,7 @@ class KVMController:
             self._force_local(self.input_error)
 
     def stop(self):
+        self.audio.close()
         self.idle_pointer.cancel()
         self._return_local()
         # The let-go and what is ahead of it may be waiting behind a clipboard read: sent first.
@@ -1270,6 +1282,7 @@ class KVMController:
         self._return_local()
         with self._cfg_lock:
             self.cfg = cfg
+        self.audio.refresh()
         frame_clock.set_divisor(effects.frame_divisor(cfg.crossing.get("frame_rate")))
         self.trigger_code = KEY_NAME_TO_CODE[cfg.trigger_key]
         self.last_trigger_down = 0.0
@@ -2359,6 +2372,7 @@ class KVMController:
         peer = link.peer_id
         if peer and self._peers_up.get(peer) is link:
             self._peers_up.pop(peer, None)
+            self.audio.link_down(peer)
             self.reset_desk_peer(peer)
             self._forget_held(peer)
             self._step(lambda owner: owner.link_down(peer))
@@ -2420,6 +2434,7 @@ class KVMController:
         if forget is not None:
             forget()
         self._step(lambda owner: owner.link_up(peer, fields["accepts"]))
+        self.audio.link_up(peer)
         if self.links.get(link.token) is not link:
             # Its machine went after the check above, and `_sync_links` ran its `_drop_up` before
             # this registered the link: undo what that could not see.
@@ -2488,11 +2503,31 @@ class KVMController:
             if link.live():
                 self._announce_paired(link)
 
+    def _audio_send(self, peer, message):
+        link = self._peers_up.get(protocol.peer_id_text(peer))
+        if link is not None and link.live():
+            return bool(link.post(message))
+        ident = protocol.read_id(protocol.peer_id_text(peer))
+        return bool(self.responder is not None and ident is not None and self.responder.send(ident, message))
+
+    def _audio_caps(self, peer):
+        link = self._peers_up.get(protocol.peer_id_text(peer))
+        caps = frozenset(link.caps) if link is not None and link.live() else frozenset()
+        ident = protocol.read_id(protocol.peer_id_text(peer))
+        if self.responder is not None and ident is not None:
+            caps |= frozenset(self.responder.caps_of(ident) or ())
+        return caps
+
     def _link_message(self, link, message):
         kind = message.get("type")
         peer = link.peer_id
         try:
-            if kind == protocol.MSG_SWITCH:
+            if kind in protocol.AUDIO_MESSAGES:
+                if "audio" in link.caps:
+                    read = protocol.read_audio(message)
+                    if read is not None:
+                        self.audio.receive(peer, *read)
+            elif kind == protocol.MSG_SWITCH:
                 read = protocol.read_switch(message)
                 if read is not None:
                     self._note_clipboard()
@@ -2813,6 +2848,7 @@ class KVMController:
         return {"type": message["type"], "data": data}
 
     def _on_moved(self, moved):
+        self.audio.input_moved(protocol.peer_id_text(moved.to) if moved.to is not None else None)
         self.logger.info(
             "move applied: to %s from %s why %s%s (thread %s)",
             self._name_of(moved.to) if moved.to is not None else "home",

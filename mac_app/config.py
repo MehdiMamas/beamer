@@ -81,6 +81,10 @@ class Config:
     # Only the machine in use shows a pointer: this Mac's after a driver lets go of it, until it
     # moves (core/idle_pointer). Its pointer always hides while it drives. This Mac's own choice.
     hide_idle_pointer: bool = True
+    audio_play_remote: bool = False
+    audio_share_mic: bool = False
+    audio_mode: str = "follow"
+    audio_host: str = ""
     # Same on all machines: the Crossing and Design pages kept in step with the PC's, and the unix
     # seconds of the last change to that or to a shared value; see settings_sync.
     same_on_both: bool = False
@@ -209,6 +213,10 @@ def parse_config(raw: dict) -> Config:
         check_updates=raw.get("check_updates", True) is not False,
         hide_addresses=raw.get("hide_addresses", False) is True,
         hide_idle_pointer=raw.get("hide_idle_pointer", True) is not False,
+        audio_play_remote=raw.get("audio_play_remote", False) is True,
+        audio_share_mic=raw.get("audio_share_mic", False) is True,
+        audio_mode=raw.get("audio_mode") if raw.get("audio_mode") in ("follow", "fixed") else "follow",
+        audio_host=raw.get("audio_host") if isinstance(raw.get("audio_host"), str) and len(raw.get("audio_host")) <= 64 else "",
         same_on_both=raw.get("same_on_both", False) is True,
         same_set_at=_stamp(raw.get("same_set_at", 0)),
         same_groups=groups,

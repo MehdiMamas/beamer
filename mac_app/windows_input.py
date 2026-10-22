@@ -73,6 +73,7 @@ class WindowsInput:
             paired_callback=self._on_paired,
             identify_callback=controller.receive_identify_screens,
             link_callback=self._on_link,
+            audio_callback=lambda peer, kind, fields: controller.audio.receive(peer, kind, fields),
             announce=self._announce,
         )
         controller.responder = self.server
@@ -201,6 +202,7 @@ class WindowsInput:
         return messages
 
     def _on_link(self, peer, up):
+        (self._controller.audio.link_up if up else self._controller.audio.link_down)(protocol.id_text(peer))
         if up:
             self._controller.profiles_capable()
         if up or not self._outbound_up(peer):
@@ -233,3 +235,4 @@ class WindowsInput:
         # The responder itself releases whatever the owner was holding before this fires.
         self._controller.driver = protocol.id_text(peer) if peer is not None else None
         self._controller.set_receiving(peer is not None)
+        self._controller.audio.owner_changed(protocol.id_text(peer) if peer is not None else None)
