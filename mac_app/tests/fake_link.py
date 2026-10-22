@@ -17,7 +17,7 @@ from core import protocol
 
 PEER_ID = bytes(range(1, 17))
 OTHER_ID = bytes(range(41, 57))
-CAPS = ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings")
+CAPS = ("clipboard", "clipboard_image", "clipboard_files", "gestures", "media_keys", "text", "settings")
 
 
 class FakeLink:

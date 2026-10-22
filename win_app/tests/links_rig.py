@@ -17,7 +17,7 @@ import sender
 
 HERE, B, C = harness.HERE, harness.B, harness.C
 MONITORS = [Rect(0, 0, 1920, 1080)]
-CAPS = frozenset({"clipboard", "clipboard_image", "settings", "media_keys"})
+CAPS = frozenset({"clipboard", "clipboard_image", "clipboard_files", "settings", "media_keys"})
 
 
 class FakeClipboard(harness.FakeClipboard):

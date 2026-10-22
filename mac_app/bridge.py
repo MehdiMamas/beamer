@@ -24,6 +24,7 @@ import crossing
 import desktop_mac
 from input_injector_mac import INJECTED_MARK
 import gestures
+from core import clipboard_files
 from core import idle_pointer
 from core import ignored
 from core import crossing_state
@@ -80,7 +81,7 @@ ROUND_TRIP_MAX_AGE_SECONDS = 5.0
 # the ownership by force after one second), then goes ahead.
 LET_GO_WAIT_SECONDS = 1.3
 OWN_PLATFORM = "macos"
-CAPABILITIES = ("clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "ping_rtt", "identify_screens", "motion_path")
+CAPABILITIES = ("clipboard", "clipboard_image", "clipboard_files", "gestures", "media_keys", "text", "settings", "design_sync", "layout", "profiles", "displays", "ping_rtt", "identify_screens", "motion_path")
 MEDIA_KEY_NAMES = frozenset({"volume_mute", "volume_down", "volume_up", "media_next", "media_prev", "media_stop", "media_play_pause", "brightness_up", "brightness_down"})
 
 # Why input came home, in words, for the alert. A why that is not here comes home quietly.
@@ -2520,7 +2521,7 @@ class KVMController:
                 read = protocol.read_clipboard(message)
                 if read is not None:
                     # Rebuilt from what was read: the owner sends it on to the machine input is on.
-                    clean = protocol.clipboard_msg(read["text"], read["image"])
+                    clean = protocol.clipboard_msg(read["text"], read["image"], clipboard_files.entries_from_parsed(read["files"]) if "files" in read else None)
                     self._step(lambda owner: owner.clipboard_arrived(peer, began, clean))
             elif kind == protocol.MSG_ARRANGEMENT:
                 self._handle_arrangement(message, peer)
@@ -2954,14 +2955,32 @@ class KVMController:
             if "clipboard_image" in caps:
                 self.logger.warning("local clipboard image (%d bytes) is past what a clipboard may carry; skipping the image", len(image))
             image = None
-        if not text and image is None:
+        files = None
+        read_files = getattr(self.clipboard, "read_files", None)
+        if "clipboard_files" in caps and read_files is not None:
+            try:
+                files = clipboard_files.encode_paths(read_files())
+            except Exception:
+                self.logger.exception("failed to read the copied files")
+            if files is not None:
+                # Files go without the image, so the frame stays under MAX_FRAME_BYTES.
+                image = None
+        if not text and image is None and files is None:
             self.logger.debug("local clipboard is empty; not sending it")
             return None
-        return link.post(protocol.clipboard_msg(text or None, image))
+        return link.post(protocol.clipboard_msg(text or None, image, files))
 
     def _set_clipboard(self, message):
         read = protocol.read_clipboard(message)
-        if read is None or (read["text"] is None and read["image"] is None):
+        if read is None or (read["text"] is None and read["image"] is None and "files" not in read):
+            return
+        paths, set_files = None, getattr(self.clipboard, "set_files", None)
+        if "files" in read and set_files is not None:
+            try:
+                paths = clipboard_files.write_transfer(read["files"])
+            except OSError:
+                self.logger.exception("could not store the received files")
+        if paths is None and read["text"] is None and read["image"] is None:
             return
         started_stamp = self._clipboard_stamp_now()
         for attempt in range(3):
@@ -2970,7 +2989,9 @@ class KVMController:
                 if started_stamp is None or self._clipboard_stamp_now() != started_stamp:
                     break
             try:
-                written = self.clipboard.set_contents(read["text"], read["image"])
+                written = bool(paths) and bool(set_files(paths))
+                if not written and (read["text"] is not None or read["image"] is not None):
+                    written = self.clipboard.set_contents(read["text"], read["image"])
             except Exception:
                 written = False
                 if attempt == 2:

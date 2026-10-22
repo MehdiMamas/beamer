@@ -63,7 +63,7 @@ class Wire(unittest.TestCase):
 
     def identity(self):
         return {"id": protocol.read_id(self.store.current()["machine_id"]), "name": "This Mac", "platform": "macos",
-                "app": "1.5.0", "caps": ["clipboard", "clipboard_image", "gestures", "media_keys", "text", "settings"],
+                "app": "1.5.0", "caps": ["clipboard", "clipboard_image", "clipboard_files", "gestures", "media_keys", "text", "settings"],
                 "port": 24820}
 
     def connected(self):
