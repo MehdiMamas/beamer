@@ -215,6 +215,46 @@ class ClipboardX11Test(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.cb.get_contents(), (None, None), "a cancelled write must not land late")
 
+    def test_set_files_offers_a_uri_list_and_a_gnome_copy(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            first = os.path.join(folder, "a b.txt")
+            open(first, "wb").close()
+            self.assertTrue(self.cb.set_files([first, folder]))
+            mime = self.clipboard.mimeData()
+            uris = bytes(mime.data("text/uri-list")).decode().split("\r\n")
+            self.assertTrue(uris[0].startswith("file:///"))
+            self.assertTrue(uris[0].endswith("a%20b.txt"))
+            gnome = bytes(mime.data("x-special/gnome-copied-files")).decode().split("\n")
+            self.assertEqual(gnome[0], "copy")
+            self.assertEqual(len(gnome), 3)
+
+    def test_what_set_files_wrote_is_not_read_back_as_a_copy(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            self.cb._owns = lambda clipboard: True
+            self.assertTrue(self.cb.set_files([folder]))
+            self.assertEqual(self.cb.read_files(), [])
+
+    def test_read_files_returns_existing_local_paths_of_a_foreign_copy(self):
+        import tempfile
+        from PySide6.QtCore import QMimeData, QUrl
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "x.txt")
+            open(path, "wb").close()
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(path), QUrl.fromLocalFile(os.path.join(folder, "gone")), QUrl("https://example.com/a")])
+            self.clipboard.setMimeData(mime)
+            self.assertEqual([os.path.normcase(p) for p in self.cb.read_files()], [os.path.normcase(path)])
+
+    def test_files_need_paths_and_text_only_clipboards_have_none(self):
+        self.assertFalse(self.cb.set_files([]))
+        self.outside_text("hi")
+        self.assertEqual(self.cb.read_files(), [])
+
     def test_no_application_reads_and_writes_nothing(self):
         code = (
             "import clipboard_x11 as c; "

@@ -12,10 +12,11 @@ untouched when the source offers it; only an image offered in another form is en
 """
 
 import logging
+import os
 import threading
 from typing import Optional, Tuple
 
-from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QObject, Qt, QThread, Signal
+from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QObject, QUrl, Qt, QThread, Signal
 from PySide6.QtGui import QGuiApplication, QImage
 
 LOGGER = logging.getLogger(__name__)
@@ -180,6 +181,60 @@ def _write(text: Optional[str], png: Optional[bytes]) -> bool:
     QGuiApplication.clipboard().setMimeData(mime)
     _synced_counter = _change_counter
     return True
+
+
+URI_LIST_MIME = "text/uri-list"
+GNOME_FILES_MIME = "x-special/gnome-copied-files"
+
+
+def _read_files() -> list:
+    _connect()
+    clipboard = QGuiApplication.clipboard()
+    # Our own write is not a copy by the user: it would go straight back to the machine it came from.
+    if _is_own_write(clipboard):
+        return []
+    mime = clipboard.mimeData()
+    if mime is None or not mime.hasUrls():
+        return []
+    paths = []
+    for url in mime.urls():
+        if url.isLocalFile():
+            path = url.toLocalFile()
+            if path and os.path.exists(path) and path not in paths:
+                paths.append(path)
+    return paths
+
+
+def _write_files(paths) -> bool:
+    global _own_token, _synced_counter
+    _connect()
+    urls = [QUrl.fromLocalFile(path) for path in paths]
+    if not urls:
+        return False
+    mime = QMimeData()
+    mime.setUrls(urls)
+    encoded = [bytes(url.toEncoded()).decode("ascii") for url in urls]
+    mime.setData(URI_LIST_MIME, ("\r\n".join(encoded) + "\r\n").encode("ascii"))
+    # What GNOME Files, Nautilus-based file managers and Dolphin read to paste a copy.
+    mime.setData(GNOME_FILES_MIME, ("copy\n" + "\n".join(encoded)).encode("ascii"))
+    _own_token += 1
+    mime.setData(OWN_FORMAT, str(_own_token).encode())
+    QGuiApplication.clipboard().setMimeData(mime)
+    _synced_counter = _change_counter
+    return True
+
+
+def read_files() -> list:
+    """Local paths of the files and folders on the clipboard (a file manager's copy), [] when there
+    are none, the clipboard is Beamer's own write, there is no Qt application or reading failed.
+    Never raises."""
+    return _on_gui(_read_files, default=[])
+
+
+def set_files(paths) -> bool:
+    """Replace the clipboard with a copy of the files at `paths`. Returns False when there is
+    nothing to set or no Qt application. Never raises."""
+    return _on_gui(_write_files, list(paths or ()), default=False)
 
 
 def get_contents() -> Tuple[Optional[str], Optional[bytes]]:
