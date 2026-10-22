@@ -422,6 +422,8 @@ class _Link:
                 return False
             if message.get("type") == protocol.MSG_IDENTIFY_SCREENS and "identify_screens" not in self.caps:
                 return True
+            if message.get("type") in protocol.AUDIO_MESSAGES and "audio" not in self.caps:
+                return True
             if len(self.outbox) >= OUTBOX_LIMIT:
                 LOGGER.warning("%s stopped reading; closing its link", self.name)
                 self._close_locked()
@@ -543,6 +545,7 @@ class LinkResponder:
         identify_callback=None,
         paired_callback=None,
         link_callback=None,
+        audio_callback=None,
         announce=None,
         listener=None,
     ) -> None:
@@ -561,7 +564,7 @@ class LinkResponder:
             "owner": owner_callback, "arrival": arrival_callback, "pressure": pressure_callback,
             "arrangement": arrangement_callback, "settings": settings_callback, "paired": paired_callback,
             "identify": identify_callback,
-            "link": link_callback,
+            "link": link_callback, "audio": audio_callback,
         }
         self._announce = announce or (lambda peer: [])
         self._prebound_listener = listener
@@ -1062,6 +1065,8 @@ class LinkResponder:
                 labels = protocol.read_identify_screens(message)
                 if labels is not None and "identify_screens" in link.caps and "identify_screens" in link.own_caps:
                     self._callback("identify", link.peer_id, labels)
+            elif kind in protocol.AUDIO_MESSAGES:
+                self._on_audio(link, message)
             elif kind == protocol.MSG_PING:
                 self._on_ping(link, message)
             elif kind == protocol.MSG_PAIRED:
@@ -1739,6 +1744,16 @@ class LinkResponder:
         return link is not None and link.post(message)
 
     # The clipboard (section 5)
+
+    def _on_audio(self, link: _Link, message) -> None:
+        """Audio is heard only when both sides advertise it. The checked message goes to
+        `audio_callback(peer_id, kind, fields)`, which decides whether this peer may stream: the
+        owner may in "follow" mode, the elected host in "fixed" mode (WIRE.md, "Audio")."""
+        if "audio" not in link.caps or "audio" not in link.own_caps:
+            return
+        read = protocol.read_audio(message)
+        if read is not None:
+            self._callback("audio", link.peer_id, *read)
 
     def _on_clipboard(self, link: _Link, message) -> None:
         read = protocol.read_clipboard(message)

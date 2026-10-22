@@ -110,6 +110,12 @@ MSG_SWITCH = "switch"
 MSG_ARRANGEMENT = "arrangement"
 MSG_SETTINGS = "settings"
 MSG_IDENTIFY_SCREENS = "identify_screens"
+MSG_AUDIO_WANT = "audio_want"
+MSG_AUDIO_START = "audio_start"
+MSG_AUDIO_DATA = "audio_data"
+MSG_AUDIO_STOP = "audio_stop"
+MSG_AUDIO_CONFIG = "audio_config"
+AUDIO_MESSAGES = frozenset({MSG_AUDIO_WANT, MSG_AUDIO_START, MSG_AUDIO_DATA, MSG_AUDIO_STOP, MSG_AUDIO_CONFIG})
 
 # System trackpad gestures. The Mac classifies one at the end of the movement and sends a
 # single message; the name is the finger motion, not its meaning, so the receiver decides
@@ -1326,3 +1332,129 @@ def read_paired(message):
     if parsed is None or parsed[0] != MSG_PAIRED:
         return None
     return _ids(parsed[1].get("ids"))
+
+
+# Audio (WIRE.md section 3, "Audio follows the input"). Raw PCM in fixed shapes: anything outside
+# these lists is refused, so a peer cannot make the player allocate or play something odd.
+AUDIO_DIRS = ("out", "mic")
+AUDIO_RATES = (48000,)
+AUDIO_CHANNELS = (1, 2)
+AUDIO_FORMATS = ("s16le",)
+AUDIO_MODES = ("follow", "fixed")
+AUDIO_FRAME_MS = (20,)
+AUDIO_MAX_FRAME_BYTES = 64 * 1024
+AUDIO_MAX_SEQ = 2 ** 32 - 1
+
+
+def audio_frame_bytes(rate: int, channels: int, frame_ms: int) -> int:
+    """The size of one s16le frame."""
+    return rate * frame_ms // 1000 * channels * 2
+
+
+def _audio_format(data):
+    """{dir, rate, channels, format, frame_ms} when `data` names an allowed shape, else None."""
+    if (not _one_of(data.get("dir"), AUDIO_DIRS)
+            or type(data.get("rate")) is not int or data["rate"] not in AUDIO_RATES
+            or type(data.get("channels")) is not int or data["channels"] not in AUDIO_CHANNELS
+            or not _one_of(data.get("format"), AUDIO_FORMATS)
+            or type(data.get("frame_ms")) is not int or data["frame_ms"] not in AUDIO_FRAME_MS):
+        return None
+    return {key: data[key] for key in ("dir", "rate", "channels", "format", "frame_ms")}
+
+
+def audio_want_msg(dir: str, rate: int = 48000, channels: int = 2, format: str = "s16le", frame_ms: int = 20) -> dict:
+    """The owner asks the machine it drives to send its `dir` stream in this shape."""
+    return {"type": MSG_AUDIO_WANT, "data": {"dir": dir, "rate": rate, "channels": channels,
+                                              "format": format, "frame_ms": frame_ms}}
+
+
+def audio_start_msg(dir: str, rate: int = 48000, channels: int = 2, format: str = "s16le", frame_ms: int = 20) -> dict:
+    """The sender of a stream announces it; `audio_data` frames of this shape follow."""
+    return {"type": MSG_AUDIO_START, "data": {"dir": dir, "rate": rate, "channels": channels,
+                                               "format": format, "frame_ms": frame_ms}}
+
+
+def audio_data_msg(dir: str, seq: int, pcm: bytes) -> dict:
+    return {"type": MSG_AUDIO_DATA, "data": {"dir": dir, "seq": seq, "pcm": base64.b64encode(pcm).decode("ascii")}}
+
+
+def audio_stop_msg(dir: str, reason: str = None) -> dict:
+    data = {"dir": dir}
+    if reason is not None:
+        data["reason"] = reason
+    return {"type": MSG_AUDIO_STOP, "data": data}
+
+
+def read_audio_format(message, kind):
+    """The fields of an `audio_want` or `audio_start`, or None when malformed or not allowed."""
+    parsed = read_message(message)
+    if parsed is None or parsed[0] != kind:
+        return None
+    return _audio_format(parsed[1])
+
+
+def read_audio_data(message):
+    """{dir, seq, pcm} of an `audio_data`, or None when malformed, oversized or not whole samples."""
+    parsed = read_message(message)
+    if parsed is None or parsed[0] != MSG_AUDIO_DATA:
+        return None
+    data = parsed[1]
+    text = data.get("pcm")
+    if not _one_of(data.get("dir"), AUDIO_DIRS) or not _int(data.get("seq"), 0, AUDIO_MAX_SEQ) or not isinstance(text, str):
+        return None
+    if len(text) > AUDIO_MAX_FRAME_BYTES * 4 // 3 + 4:
+        return None
+    try:
+        pcm = base64.b64decode(text.encode("ascii"), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if not pcm or len(pcm) > AUDIO_MAX_FRAME_BYTES or len(pcm) % 4:
+        return None
+    return {"dir": data["dir"], "seq": data["seq"], "pcm": pcm}
+
+
+def read_audio_stop(message):
+    """{dir} of an `audio_stop`, or None."""
+    parsed = read_message(message)
+    if parsed is None or parsed[0] != MSG_AUDIO_STOP or not _one_of(parsed[1].get("dir"), AUDIO_DIRS):
+        return None
+    return {"dir": parsed[1]["dir"]}
+
+
+def audio_config_msg(mode: str, host: bytes = None) -> dict:
+    """Who plays the sound: `follow` (the machine that owns the input) or `fixed` with `host`, one
+    machine that plays everyone's sound and shares its microphone whatever owns the input."""
+    data = {"mode": mode}
+    if host is not None:
+        data["host"] = id_text(host)
+    return {"type": MSG_AUDIO_CONFIG, "data": data}
+
+
+def read_audio_config(message):
+    """{mode, host} of an `audio_config` (host is the id, None unless fixed), or None."""
+    parsed = read_message(message)
+    if parsed is None or parsed[0] != MSG_AUDIO_CONFIG:
+        return None
+    data = parsed[1]
+    if not _one_of(data.get("mode"), AUDIO_MODES):
+        return None
+    if data["mode"] == "follow":
+        return {"mode": "follow", "host": None}
+    host = read_id(data.get("host"))
+    return None if host is None else {"mode": "fixed", "host": host}
+
+
+def read_audio(message):
+    """(kind, fields) of any audio message that is well formed and within the limits, else None."""
+    kind = message.get("type") if isinstance(message, dict) else None
+    if kind in (MSG_AUDIO_WANT, MSG_AUDIO_START):
+        fields = read_audio_format(message, kind)
+    elif kind == MSG_AUDIO_DATA:
+        fields = read_audio_data(message)
+    elif kind == MSG_AUDIO_STOP:
+        fields = read_audio_stop(message)
+    elif kind == MSG_AUDIO_CONFIG:
+        fields = read_audio_config(message)
+    else:
+        return None
+    return None if fields is None else (kind, fields)
