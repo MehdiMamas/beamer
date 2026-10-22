@@ -224,6 +224,12 @@ class FakeWin32:
         self.formats[clipboard_format] = handle
         return handle
 
+    def RegisterClipboardFormatW(self, name):
+        return 49152 + sum(name.encode("ascii")) % 1000
+
+    def GetClipboardSequenceNumber(self):
+        return getattr(self, "sequence", 1)
+
 
 def fake_png_to_bgra(png):
     if not png.startswith(b"FAKEPNG"):
@@ -405,6 +411,59 @@ class ClipboardOrchestrationTests(unittest.TestCase):
             self.assertEqual(clipboard_win.change_stamp(), clipboard_win.user32.GetClipboardSequenceNumber())
         else:
             self.assertIsNone(clipboard_win.change_stamp())
+
+
+
+
+
+class FileListTests(unittest.TestCase):
+    def test_hdrop_round_trips_wide_paths(self):
+        paths = ["C:/Users/a/notes.txt", "C:/Users/a/dossier \u00e9t\u00e9", "D:/x"]
+        data = clipboard_win.build_hdrop(paths)
+        self.assertEqual(struct.unpack_from("<IiiII", data, 0), (20, 0, 0, 0, 1))
+        self.assertTrue(data.endswith(b"\x00\x00\x00\x00"))
+        self.assertEqual(clipboard_win.parse_hdrop(data), paths)
+
+    def test_hdrop_ansi_form_is_read(self):
+        data = struct.pack("<IiiII", 20, 0, 0, 0, 0) + b"C:/a.txt\x00C:/b.txt\x00\x00"
+        with mock.patch.object(clipboard_win, "_IS_WINDOWS", False):
+            self.assertEqual(clipboard_win.parse_hdrop(data), ["C:/a.txt", "C:/b.txt"])
+
+    def test_hdrop_junk_never_raises(self):
+        for data in (b"", b"\x00" * 5, struct.pack("<IiiII", 999, 0, 0, 0, 1), struct.pack("<IiiII", 4, 0, 0, 0, 1), b"\xff" * 40):
+            with self.subTest(data=data):
+                self.assertIsInstance(clipboard_win.parse_hdrop(data), list)
+
+    def test_set_files_writes_the_list_and_a_copy_effect_and_remembers_the_write(self):
+        mem32 = FakeMem32()
+        win32 = FakeWin32(mem32)
+        win32.sequence = 77
+        seen = []
+        self.assertTrue(clipboard_win._set_files(win32, mem32, ["C:/t/a.txt"], written=seen.append))
+        self.assertEqual(clipboard_win.parse_hdrop(mem32.contents(win32.formats[clipboard_win.CF_HDROP])), ["C:/t/a.txt"])
+        effect = [handle for fmt, handle in win32.formats.items() if fmt != clipboard_win.CF_HDROP]
+        self.assertEqual(struct.unpack("<I", mem32.contents(effect[0]))[0], clipboard_win.DROPEFFECT_COPY)
+        self.assertEqual(seen, [77])
+        self.assertEqual(win32.destroyed, [123])
+
+    def test_set_files_with_nothing_leaves_the_clipboard(self):
+        mem32 = FakeMem32()
+        win32 = FakeWin32(mem32, {CF_UNICODETEXT: mem32.handle_for("keep")})
+        self.assertFalse(clipboard_win._set_files(win32, mem32, []))
+        self.assertEqual(win32.emptied, 0)
+
+    def test_read_files_reads_what_set_files_wrote(self):
+        mem32 = FakeMem32()
+        win32 = FakeWin32(mem32)
+        clipboard_win._set_files(win32, mem32, ["C:/t/a.txt", "C:/t/dir"])
+        self.assertEqual(clipboard_win._get_files(win32, mem32), ["C:/t/a.txt", "C:/t/dir"])
+
+    def test_read_files_is_empty_without_a_list_and_off_windows(self):
+        mem32 = FakeMem32()
+        self.assertEqual(clipboard_win._get_files(FakeWin32(mem32, {CF_UNICODETEXT: mem32.handle_for("t")}), mem32), [])
+        with mock.patch.object(clipboard_win, "_IS_WINDOWS", False):
+            self.assertEqual(clipboard_win.read_files(), [])
+            self.assertFalse(clipboard_win.set_files(["x"]))
 
 
 if __name__ == "__main__":

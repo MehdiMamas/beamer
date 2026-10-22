@@ -68,9 +68,14 @@ if _IS_WINDOWS:
     ]
     user32.DestroyWindow.restype = ctypes.c_int
     user32.DestroyWindow.argtypes = [ctypes.c_void_p]
+    user32.RegisterClipboardFormatW.restype = ctypes.c_uint
+    user32.RegisterClipboardFormatW.argtypes = [ctypes.c_wchar_p]
 
 CF_DIB = 8
 CF_UNICODETEXT = 13
+CF_HDROP = 15
+DROPFILES_SIZE = 20
+DROPEFFECT_COPY = 1
 GMEM_MOVEABLE = 0x0002
 
 BI_RGB = 0
@@ -160,6 +165,37 @@ def bgra_to_dib(width: int, height: int, bgra: bytes) -> bytes:
     )
     rows = [bgra[i * stride: (i + 1) * stride] for i in range(height)]
     return header + b"".join(reversed(rows))
+
+
+def build_hdrop(paths) -> bytes:
+    """A CF_HDROP payload for `paths`: a DROPFILES header (offset of the list, a zero point,
+    not in the non-client area, wide characters) and each path UTF-16, NUL-ended, with one more
+    NUL closing the list. Pure."""
+    body = b"".join(str(path).encode("utf-16-le") + b"\x00\x00" for path in paths) + b"\x00\x00"
+    return struct.pack("<IiiII", DROPFILES_SIZE, 0, 0, 0, 1) + body
+
+
+def parse_hdrop(data: bytes):
+    """The paths in a CF_HDROP payload, wide or ANSI, as a list of str; [] for junk. Never raises."""
+    try:
+        if len(data) < DROPFILES_SIZE:
+            return []
+        offset, _x, _y, _nc, wide = struct.unpack_from("<IiiII", data, 0)
+        if offset < DROPFILES_SIZE or offset > len(data):
+            return []
+        body = data[offset:]
+        if wide:
+            text = body[: len(body) - len(body) % 2].decode("utf-16-le", errors="replace")
+        else:
+            text = body.decode("mbcs" if _IS_WINDOWS else "utf-8", errors="replace")
+        paths = []
+        for item in text.split("\x00"):
+            if not item:
+                break
+            paths.append(item)
+        return paths
+    except (struct.error, ValueError, OverflowError):
+        return []
 
 
 def _png_to_bgra(png: bytes):
@@ -288,6 +324,64 @@ def _put_clipboard_data(win32, mem32, clipboard_format, payload):
         mem32.GlobalFree(handle)
         return False
     return True
+
+
+def _read_clipboard_files(win32, mem32):
+    """The paths of a CF_HDROP file list on the (already-open) clipboard, or [] if there is none."""
+    if not win32.IsClipboardFormatAvailable(CF_HDROP):
+        return []
+    handle = win32.GetClipboardData(CF_HDROP)
+    if not handle:
+        raise OSError("the clipboard file list could not be read")
+    size = mem32.GlobalSize(handle)
+    pointer = mem32.GlobalLock(handle) if size else None
+    if not pointer:
+        raise OSError("the clipboard file list could not be locked")
+    try:
+        data = ctypes.string_at(pointer, size)
+    finally:
+        mem32.GlobalUnlock(handle)
+    return parse_hdrop(data)
+
+
+def _get_files(win32, mem32, attempts=OPEN_RETRY_ATTEMPTS, delay=OPEN_RETRY_DELAY_SECONDS, sleep=time.sleep):
+    if not _open_clipboard(win32, attempts, delay, sleep):
+        LOGGER.warning("could not open the clipboard for reading files")
+        return []
+    try:
+        return _read_clipboard_files(win32, mem32)
+    finally:
+        win32.CloseClipboard()
+
+
+def _set_files(win32, mem32, paths, attempts=OPEN_RETRY_ATTEMPTS, delay=OPEN_RETRY_DELAY_SECONDS, sleep=time.sleep, written=None):
+    """Replace the clipboard with `paths` as a file list a copy-paste in Explorer takes (CF_HDROP
+    and a "copy" Preferred DropEffect)."""
+    if not paths:
+        return False
+    owner = win32.CreateWindowExW(0, "STATIC", None, 0, 0, 0, 0, 0, -3, None, None, None)
+    if not owner:
+        LOGGER.warning("could not create the clipboard owner")
+        return False
+    try:
+        if not _open_clipboard(win32, attempts, delay, sleep, owner=owner):
+            LOGGER.warning("could not open the clipboard for writing")
+            return False
+        try:
+            if not win32.EmptyClipboard():
+                return False
+            if not _put_clipboard_data(win32, mem32, CF_HDROP, build_hdrop(paths)):
+                return False
+            effect = win32.RegisterClipboardFormatW("Preferred DropEffect")
+            if effect:
+                _put_clipboard_data(win32, mem32, effect, struct.pack("<I", DROPEFFECT_COPY))
+            if written is not None:
+                written(win32.GetClipboardSequenceNumber())
+            return True
+        finally:
+            win32.CloseClipboard()
+    finally:
+        win32.DestroyWindow(owner)
 
 
 def _get_contents(win32, mem32, attempts=OPEN_RETRY_ATTEMPTS, delay=OPEN_RETRY_DELAY_SECONDS, sleep=time.sleep,
@@ -427,4 +521,33 @@ def set_contents(text: Optional[str], png: Optional[bytes]) -> bool:
             return _set_contents(user32, kernel32, text, png, written=remember)
     except Exception:
         LOGGER.exception("failed to set the Windows clipboard")
+        return False
+
+
+def read_files() -> list:
+    """The absolute paths of the files and folders copied in Explorer, [] when there are none or
+    this isn't Windows. Never raises."""
+    if not _IS_WINDOWS:
+        return []
+    try:
+        with _LOCK:
+            return _get_files(user32, kernel32)
+    except Exception:
+        LOGGER.exception("failed to read the Windows clipboard's files")
+        return []
+
+
+def set_files(paths) -> bool:
+    """Replace the Windows clipboard with the files at `paths`, to paste in Explorer. Returns True
+    when set, False if this isn't Windows or the write failed. Never raises."""
+    if not _IS_WINDOWS:
+        return False
+    def remember(sequence):
+        global _synced_sequence, _written_sequence
+        _synced_sequence = _written_sequence = sequence
+    try:
+        with _LOCK:
+            return _set_files(user32, kernel32, list(paths), written=remember)
+    except Exception:
+        LOGGER.exception("failed to set the Windows clipboard's files")
         return False
