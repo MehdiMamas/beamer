@@ -51,7 +51,7 @@ NOT_SHOWN = {
     "pack", "warning", "append", "__init__", "find_library", "setValue_forHTTPHeaderField_",
     "loadBundle", "lookUpClass", "protocolNamed", "normalize", "lookup", "len",
     "dispatch", "ExecMethod_", "Methods_", "persistentDomainForName_",
-    "beginActivityWithOptions_reason_", "asset_path", "CreateMutexW", "OpenMutexW", "QKeySequence",
+    "beginActivityWithOptions_reason_", "asset_path", "CreateMutexW", "OpenMutexW", "RegisterClipboardFormatW", "QKeySequence",
     "_turn_off_clashes", "exception", "_force_local", "stringForKey_", "open_dbus_connection", "update",
     "require_version", "_log_helper_failure",
 }
