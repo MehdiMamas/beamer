@@ -145,14 +145,15 @@ def set_cursor_position_with_callback(x: int, y: int, on_placed=None, *, place_i
 
 
 # What SHQueryUserNotificationState says while something owns the whole screen. 3 is a Direct3D
-# exclusive full-screen game and 4 is Presentation Settings, both unambiguous. 2, QUNS_BUSY, is
-# also what a borderless game or a browser on F11 gives, but overlays such as NVIDIA's raise it
-# with nothing full screen at all (PowerToys PR #45891 split it out of its own guard for that), so
-# it counts only with the foreground window covering its whole monitor. A maximised window stops
-# at the taskbar and never does, which is what keeps this from becoming the size test the Mac
-# learned catches every zoomed window.
+# exclusive full-screen game and 4 is Presentation Settings, both unambiguous and always counted.
+# A borderless ("windowed fullscreen") game is not reliably reported as either: it can come back as
+# QUNS_BUSY (2), as accepting notifications (1), or as anything else, so any foreground window that
+# covers its whole monitor counts, whatever the state. Overlays such as NVIDIA's raise QUNS_BUSY
+# with nothing full screen at all (PowerToys PR #45891 split it out of its own guard for that), and
+# they do not cover the monitor, so they still do not count. A maximised window stops at the
+# taskbar and never does, which is what keeps this from becoming the size test the Mac learned
+# catches every zoomed window.
 _EXCLUSIVE_STATES = {3, 4}
-QUNS_BUSY = 2
 # The desktop and the taskbar are monitor-sized and foreground whenever the desktop is clicked.
 _SHELL_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
 
@@ -167,7 +168,7 @@ def full_screen_app():
     state = ctypes.c_int(0)
     if ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) != 0:
         return None
-    if state.value in _EXCLUSIVE_STATES or (state.value == QUNS_BUSY and _foreground_covers_its_monitor()):
+    if state.value in _EXCLUSIVE_STATES or _foreground_covers_its_monitor():
         return _foreground_app_name() or "An app"
     return None
 
